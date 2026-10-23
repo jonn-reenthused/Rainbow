@@ -1,5 +1,5 @@
 # Rainbow
-### A BASIC software creation system for retro computers
+## A BASIC software creation system for retro computers
 
 I started working on this a few years back, but could never quite get it right. It started as a BASIC compiler for the Spectrum, then I added
 more tools and started to add other systems.
@@ -17,4 +17,7 @@ tried to verify everything though - so it should be correct, it just might be mi
 
 I don't think I entirely cracked DISK formats, they seem a little ropey.
 
-You'll need Pasmo installed for the Speccy and Amstrad and CC65 installed for the C64.
+### Prerequisites
+- Flutter for the main IDE and compiler.
+- Pasmo for the Speccy and Amstrad
+- CC65 for the C64.
