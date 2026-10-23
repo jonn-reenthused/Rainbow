@@ -42,24 +42,32 @@ class IdeState extends ChangeNotifier {
       '-autoboot_command "LOAD\\"*\\",8,1\\nRUN\\n"';
   static const _oldDefaultEmulatorCmd =
       '/Applications/Fuse.app/Contents/MacOS/Fuse --machine 48 --tape {tap}';
-  String emulatorCmd =
-      '/Applications/Fuse.app/Contents/MacOS/Fuse --machine {machine} '
-      '--tape {tap}';
+  /// Default emulator commands are host-OS specific: macOS launches the
+  /// installed apps directly; Windows/Linux invoke binaries on PATH
+  /// (Fuse has ports on both, Retro Virtual Machine ships as a single
+  /// exe on all three). Everything is editable in Settings.
+  String emulatorCmd = Platform.isMacOS
+      ? '/Applications/Fuse.app/Contents/MacOS/Fuse --machine {machine} '
+          '--tape {tap}'
+      : 'fuse --machine {machine} --tape {tap}';
 
   /// ZX disk command — used when the built artifact is a `.dsk`
   /// (zxplus3), since emulators take a different switch for disks
   /// (Fuse: `--disk`, Arnold-style `-drivea` on CPC).
-  String emulatorCmdDsk =
-      '/Applications/Fuse.app/Contents/MacOS/Fuse --machine {machine} '
-      '--disk {file}';
-  String emulatorCmdCpc =
-      'open -a "Retro Virtual Machine 2.1" {file}';
+  String emulatorCmdDsk = Platform.isMacOS
+      ? '/Applications/Fuse.app/Contents/MacOS/Fuse --machine {machine} '
+          '--disk {file}'
+      : 'fuse --machine {machine} --disk {file}';
+  String emulatorCmdCpc = Platform.isMacOS
+      ? 'open -a "Retro Virtual Machine 2.1" {file}'
+      : 'RetroVirtualMachine {file}';
 
   /// CPC disk command — used when the built artifact is a `.dsk`
   /// (cpc6128) instead of a tape image, since e.g. Arnold needs
   /// `-drivea` for disks but `-tape` for cassettes.
-  String emulatorCmdCpcDsk =
-      'open -a "Retro Virtual Machine 2.1" {file}';
+  String emulatorCmdCpcDsk = Platform.isMacOS
+      ? 'open -a "Retro Virtual Machine 2.1" {file}'
+      : 'RetroVirtualMachine {file}';
 
   /// CBM command — c64 builds emit `.prg`, `.tap` and `.d64`, c128
   /// adds `.d71`; `{file}` resolves to the `.d71`/`.d64` when it
@@ -82,9 +90,10 @@ class IdeState extends ChangeNotifier {
   String emulatorCmdCbmPrg = 'mame {machine} -quik {file}';
 
   /// ZX cartridge command — Interface 2 `.rom` images.
-  String emulatorCmdCart =
-      '/Applications/Fuse.app/Contents/MacOS/Fuse --machine {machine} '
-      '--interface2 {file}';
+  String emulatorCmdCart = Platform.isMacOS
+      ? '/Applications/Fuse.app/Contents/MacOS/Fuse --machine {machine} '
+          '--interface2 {file}'
+      : 'fuse --machine {machine} --interface2 {file}';
 
   /// CPC cartridge command — CPC+/GX4000 `.cpr` images. Defaults to
   /// cpc6128p rather than gx4000: the GX4000 is 64K-only, so its MMR
@@ -633,7 +642,9 @@ class IdeState extends ChangeNotifier {
     log.add('run: $cmd');
     notifyListeners();
     try {
-      await Process.start('/bin/sh', ['-c', cmd]);
+      await (Platform.isWindows
+          ? Process.start('cmd', ['/d', '/c', cmd])
+          : Process.start('/bin/sh', ['-c', cmd]));
     } catch (e) {
       log.add('run failed: $e');
       notifyListeners();

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:rainbow_compiler/rainbow_compiler.dart';
 
 import '../app_state.dart';
+import '../spectrum.dart';
 
 const _baseColour = Color(0xFFD4D4D4);
 const _kwColour = Color(0xFF569CD6);
@@ -15,7 +16,9 @@ const _warnColour = Color(0xFFCCA700);
 const gutterColour = Color(0xFF6E7681);
 
 const codeStyle =
-    TextStyle(fontFamily: 'Menlo', fontSize: 13, height: 1.35, color: _baseColour);
+    TextStyle(fontFamily: 'Menlo',
+          fontFamilyFallback: monoFontFallback,
+          fontSize: 13, height: 1.35, color: _baseColour);
 
 /// Syntax-highlighting controller for Rainbow BASIC.
 ///

@@ -164,9 +164,32 @@ Uint8List wavFromPcm(Float64List samples, {int rate = _rate}) {
   return out.toBytes();
 }
 
-/// Write PCM to a temp .wav and play it with afplay (macOS).
+/// Write PCM to a temp .wav and play it with the platform's bundled
+/// player: afplay on macOS, PowerShell SoundPlayer on Windows,
+/// aplay/paplay/ffplay on Linux.
 Future<void> playPreview(Float64List samples) async {
   final f = File('${Directory.systemTemp.path}/rainbow_preview.wav');
   await f.writeAsBytes(wavFromPcm(samples));
-  await Process.start('afplay', [f.path]);
+  if (Platform.isMacOS) {
+    await Process.start('afplay', [f.path]);
+  } else if (Platform.isWindows) {
+    await Process.start('powershell', [
+      '-NoProfile',
+      '-Command',
+      "(New-Object System.Media.SoundPlayer '${f.path}').PlaySync()",
+    ]);
+  } else {
+    for (final player in [
+      const ['aplay'],
+      const ['paplay'],
+      const ['ffplay', '-nodisp', '-autoexit'],
+    ]) {
+      try {
+        await Process.start(player.first, [...player.skip(1), f.path]);
+        return;
+      } on ProcessException {
+        continue;
+      }
+    }
+  }
 }

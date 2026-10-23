@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:rainbow_assets/rainbow_assets.dart';
 import 'package:rainbow_compiler/rainbow_compiler.dart';
 
 import '../app_state.dart';
+import '../spectrum.dart';
 import 'code_editor.dart';
 import 'font_editor.dart';
 import 'music_editor.dart';
@@ -31,18 +33,25 @@ class _ShellState extends State<Shell> {
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
+    // Command-key shortcuts on macOS, Control elsewhere (SingleActivator
+    // requires modifiers not listed to be up, so this must be exact).
+    final mac = Platform.isMacOS;
     return AnimatedBuilder(
       animation: s,
       builder: (context, _) => Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.keyS, meta: true): _SaveIntent(),
-          SingleActivator(LogicalKeyboardKey.keyB, meta: true): _BuildIntent(),
-          SingleActivator(LogicalKeyboardKey.keyR, meta: true): _RunIntent(),
-          SingleActivator(LogicalKeyboardKey.keyO, meta: true): _OpenIntent(),
-          SingleActivator(LogicalKeyboardKey.keyP, meta: true):
-              _QuickOpenIntent(),
-          SingleActivator(LogicalKeyboardKey.keyN, meta: true, shift: true):
-              _NewProjectIntent(),
+        shortcuts: {
+          SingleActivator(LogicalKeyboardKey.keyS,
+              meta: mac, control: !mac): _SaveIntent(),
+          SingleActivator(LogicalKeyboardKey.keyB,
+              meta: mac, control: !mac): _BuildIntent(),
+          SingleActivator(LogicalKeyboardKey.keyR,
+              meta: mac, control: !mac): _RunIntent(),
+          SingleActivator(LogicalKeyboardKey.keyO,
+              meta: mac, control: !mac): _OpenIntent(),
+          SingleActivator(LogicalKeyboardKey.keyP,
+              meta: mac, control: !mac): _QuickOpenIntent(),
+          SingleActivator(LogicalKeyboardKey.keyN,
+              meta: mac, control: !mac, shift: true): _NewProjectIntent(),
         },
         child: Actions(
           actions: {
@@ -583,7 +592,7 @@ class _ShellState extends State<Shell> {
                   labelText: 'pasmo path',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -593,7 +602,7 @@ class _ShellState extends State<Shell> {
                       '({file} = artifact, {machine} = 48/128)',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -604,7 +613,7 @@ class _ShellState extends State<Shell> {
                       '({machine} = plus3)',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -615,7 +624,7 @@ class _ShellState extends State<Shell> {
                   hintText: 'Fuse --machine {machine} --interface2 {file}',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -625,7 +634,7 @@ class _ShellState extends State<Shell> {
                       '({file} = artifact, {cpctype} = Arnold model)',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -635,7 +644,7 @@ class _ShellState extends State<Shell> {
                   hintText: 'arnold -cpctype {cpctype} -drivea {file}',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -645,7 +654,7 @@ class _ShellState extends State<Shell> {
                       '(CPC+/GX4000)',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -657,7 +666,7 @@ class _ShellState extends State<Shell> {
                       '-autoboot_command "LOAD\\"*\\",8,1\\nRUN\\n"',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -667,7 +676,7 @@ class _ShellState extends State<Shell> {
                   hintText: 'mame {machine} -cass {file}',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -677,7 +686,7 @@ class _ShellState extends State<Shell> {
                   hintText: 'mame {machine} -cart {file}',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -687,7 +696,7 @@ class _ShellState extends State<Shell> {
                   hintText: 'mame {machine} -quik {file}',
                   isDense: true,
                 ),
-                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
             ],
           ),
@@ -1138,7 +1147,7 @@ class _ShellState extends State<Shell> {
       itemBuilder: (context, i) => Text(
         s.log[i],
         style: const TextStyle(
-          fontFamily: 'Menlo',
+          fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback,
           fontSize: 11,
           color: Colors.white70,
         ),
@@ -1175,7 +1184,7 @@ class _ShellState extends State<Shell> {
               Text(
                 '${d.file}:${d.line}:${d.col}',
                 style: const TextStyle(
-                  fontFamily: 'Menlo',
+                  fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback,
                   fontSize: 11,
                   color: Colors.white54,
                 ),

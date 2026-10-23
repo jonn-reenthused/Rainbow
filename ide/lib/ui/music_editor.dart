@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../audio.dart';
+import '../spectrum.dart';
 
 /// Tracker-style editor for `.rnt` (AntEater beeper) and `.ray` (AY)
 /// music assets, with a host-side PCM preview (approximate timing).
@@ -178,7 +179,7 @@ class _MusicEditorState extends State<MusicEditor> {
       height: 26,
       child: TextField(
         controller: ctl,
-        style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+        style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
         decoration: const InputDecoration(
           isDense: true,
           contentPadding: EdgeInsets.all(4),
@@ -206,7 +207,7 @@ class _MusicEditorState extends State<MusicEditor> {
       height: 26,
       child: TextField(
         controller: ctl,
-        style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+        style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
         decoration: const InputDecoration(
           isDense: true,
           contentPadding: EdgeInsets.all(4),
@@ -234,7 +235,7 @@ class _MusicEditorState extends State<MusicEditor> {
       height: 26,
       child: TextField(
         controller: ctl,
-        style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+        style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
         decoration: const InputDecoration(
           isDense: true,
           contentPadding: EdgeInsets.all(4),
@@ -390,7 +391,7 @@ class _MusicEditorState extends State<MusicEditor> {
                                 isLoop ? '$i ↻' : '$i',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontFamily: 'Menlo',
+                                  fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback,
                                   color: isLoop
                                       ? const Color(0xFF9ECE6A)
                                       : Colors.white38,
@@ -449,7 +450,7 @@ class _MusicEditorState extends State<MusicEditor> {
         child: DropdownButton<int>(
           isDense: true,
           value: (r['dr'] as int? ?? 0).clamp(0, 4),
-          style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+          style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
           items: const [
             DropdownMenuItem(value: 0, child: Text('-')),
             DropdownMenuItem(value: 1, child: Text('D1')),
@@ -511,7 +512,7 @@ class _MusicEditorState extends State<MusicEditor> {
             child: DropdownButton<String>(
               isDense: true,
               value: waveAt(idx),
-              style: const TextStyle(fontFamily: 'Menlo', fontSize: 10),
+              style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 10),
               items: [
                 for (final w in waves)
                   DropdownMenuItem(value: w, child: Text(w)),
@@ -613,7 +614,7 @@ class _MusicEditorState extends State<MusicEditor> {
         child: DropdownButton<int>(
           isDense: true,
           value: (r['drum'] as int? ?? 0).clamp(0, 4),
-          style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+          style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
           items: const [
             DropdownMenuItem(value: 0, child: Text('-')),
             DropdownMenuItem(value: 1, child: Text('D1')),
@@ -711,7 +712,7 @@ class _SfxEditorState extends State<SfxEditor> {
                   isDense: true,
                   isExpanded: true,
                   hint: const Text('preset', style: TextStyle(fontSize: 11)),
-                  style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+                  style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
                   items: [
                     for (final p in _rsfPresets.keys)
                       DropdownMenuItem(value: p, child: Text(p)),
@@ -774,7 +775,7 @@ class _SfxEditorState extends State<SfxEditor> {
                     height: 26,
                     child: TextField(
                       controller: TextEditingController(text: '${s[k] ?? 0}'),
-                      style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
+                      style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 11),
                       decoration: InputDecoration(
                         labelText: k,
                         labelStyle: const TextStyle(fontSize: 9),

@@ -25,6 +25,16 @@ const zxBright = [
   Color(0xFFFFFFFF),
 ];
 
+/// Monospace fallback chain for `fontFamily: 'Menlo'` — Menlo exists
+/// only on macOS; Consolas ships with Windows, DejaVu/Liberation Mono
+/// with most Linux desktops.
+const monoFontFallback = [
+  'Consolas',
+  'DejaVu Sans Mono',
+  'Liberation Mono',
+  'monospace',
+];
+
 /// Decode a Spectrum attribute byte: FLASH|BRIGHT|PAPER|INK.
 Color zxInk(int attr) =>
     (attr & 0x40) != 0 ? zxBright[attr & 7] : zxColours[attr & 7];
