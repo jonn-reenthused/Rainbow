@@ -1,0 +1,25 @@
+name: rainbow_ide
+description: Rainbow — ZX Spectrum game creation IDE.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  rainbow_compiler:
+    path: ../packages/rainbow_compiler
+  rainbow_assets:
+    path: ../packages/rainbow_assets
+  file_selector: ^1.0.3
+  shared_preferences: ^2.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

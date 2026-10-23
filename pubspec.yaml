@@ -1,0 +1,6 @@
+name: rainbow_workspace
+description: Rainbow — ZX Spectrum game creation IDE. Workspace root.
+publish_to: none
+
+environment:
+  sdk: ^3.0.0

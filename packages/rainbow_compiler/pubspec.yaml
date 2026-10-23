@@ -1,0 +1,14 @@
+name: rainbow_compiler
+description: Rainbow BASIC to Pasmo-compatible Z80 assembler compiler for the ZX Spectrum.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  rainbow_assets:
+    path: ../rainbow_assets
+
+dev_dependencies:
+  test: ^1.24.0
