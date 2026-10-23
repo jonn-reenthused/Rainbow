@@ -1,0 +1,15 @@
+{
+ "type": "rsf",
+ "steps": [
+  {
+   "per": 80,
+   "len": 10,
+   "slide": 0
+  },
+  {
+   "per": 60,
+   "len": 14,
+   "slide": 0
+  }
+ ]
+}

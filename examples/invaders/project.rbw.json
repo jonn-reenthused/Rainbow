@@ -1,0 +1,7 @@
+{
+  "name": "INVADERS",
+  "target": "zx48",
+  "sources": [
+    "src/main.rbw"
+  ]
+}

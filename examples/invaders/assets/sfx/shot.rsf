@@ -1,0 +1,7 @@
+{
+  "type": "rsf",
+  "steps": [
+    { "per": 120, "len": 5, "slide": -10 },
+    { "per": 80,  "len": 4, "slide": -6 }
+  ]
+}

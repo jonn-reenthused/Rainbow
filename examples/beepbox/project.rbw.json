@@ -1,0 +1,7 @@
+{
+  "name": "BEEPBOX",
+  "target": "zx48",
+  "sources": [
+    "src/main.rbw"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "MUNCHER",
+  "target": "zx48",
+  "sources": [
+    "src/main.rbw"
+  ]
+}

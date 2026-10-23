@@ -1,0 +1,8 @@
+{
+  "name": "ROBOTRON",
+  "model": "48k",
+  "entry": "src/main.rbw",
+  "sourceDirs": ["src"],
+  "assetDirs": ["assets"],
+  "stack": 32766
+}

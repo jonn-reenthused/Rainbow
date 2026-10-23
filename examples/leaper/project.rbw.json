@@ -1,0 +1,7 @@
+{
+  "name": "LEAPER",
+  "target": "zx48",
+  "sources": [
+    "src/main.rbw"
+  ]
+}

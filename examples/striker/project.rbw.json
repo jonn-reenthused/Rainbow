@@ -1,0 +1,17 @@
+{
+  "name": "STRIKER",
+  "sources": [
+    "src/main.rbw"
+  ],
+  "targets": {
+    "zx48": {
+      "target": "zx48"
+    },
+    "cpc464": {
+      "target": "cpc464"
+    },
+    "c64": {
+      "target": "c64"
+    }
+  }
+}

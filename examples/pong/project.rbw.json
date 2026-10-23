@@ -1,0 +1,7 @@
+{
+  "name": "PONG",
+  "target": "zx48",
+  "sources": [
+    "src/main.rbw"
+  ]
+}

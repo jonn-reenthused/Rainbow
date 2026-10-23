@@ -1,0 +1,23 @@
+{
+  "name": "BANKED",
+  "sources": [
+    "src/main.rbw"
+  ],
+  "targets": {
+    "zx128": {
+      "target": "zx128"
+    },
+    "zxplus3": {
+      "target": "zxplus3"
+    },
+    "cpc6128": {
+      "target": "cpc6128"
+    },
+    "c64": {
+      "target": "c64"
+    },
+    "c128": {
+      "target": "c128"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "JUKEBOX",
+  "target": "zx128",
+  "sources": [
+    "src/main.rbw"
+  ]
+}
