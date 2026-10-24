@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
+import 'fonts.dart';
 import 'snd_assets.dart';
-import 'zx_font.dart';
 
 /// Encoders for Rainbow graphics assets (.rbs / .rbt / .rbm JSON files).
 ///
@@ -339,13 +339,25 @@ Uint8List encodeTileset(String name, Map<String, dynamic> json) {
   return out.toBytes();
 }
 
-/// Encode a font asset: 96 glyphs (ASCII 32-127), 8 bytes each.
+/// Encode a font asset: 96 glyphs (ASCII 32-127), packed per the font's
+/// declared system/mode (see FontSpec for the field meanings).
 ///
-/// `.rbf` JSON: `"chars"` is a map of ASCII code (as string) -> list of 8
-/// row strings. Codes without an entry inherit the Spectrum ROM glyph
-/// (set `"base": "blank"` to start from empty glyphs instead), so a font
-/// file only needs the glyphs it overrides.
+/// `.rbf` JSON: `"chars"` maps ASCII code (as string) -> list of 8 row
+/// strings of `w` pixel chars. Codes without an entry inherit the
+/// *system* ROM glyph (set `"base": "blank"` for empty glyphs instead),
+/// so a font file only needs the glyphs it overrides.
 Uint8List encodeFont(String name, Map<String, dynamic> json) {
+  final spec = fontSpec(json);
+  if (spec.system != 'zx' && spec.system != 'cpc' && spec.system != 'c64') {
+    throw AssetFormatException(
+        name, 'unknown font system "${json['system']}" (zx|cpc|c64)');
+  }
+  if (spec.w != 4 && spec.w != 8) {
+    throw AssetFormatException(name, 'font w must be 4 or 8');
+  }
+  if (spec.system == 'cpc' && (spec.mode < 0 || spec.mode > 2)) {
+    throw AssetFormatException(name, 'CPC font mode must be 0, 1 or 2');
+  }
   final chars = json['chars'] as Map<String, dynamic>? ?? const {};
   final romBase = json['base'] != 'blank';
   final out = BytesBuilder(copy: false);
@@ -353,9 +365,11 @@ Uint8List encodeFont(String name, Map<String, dynamic> json) {
     final rows = (chars['$code'] as List?)?.cast<String>();
     if (rows == null) {
       if (romBase) {
-        out.add(zxFont.sublist((code - 32) * 8, (code - 32) * 8 + 8));
+        for (final px in fontBasePixels(spec, code)) {
+          out.add(fontPackRow(px, spec));
+        }
       } else {
-        for (var i = 0; i < 8; i++) {
+        for (var i = 0; i < spec.bytesPerGlyph; i++) {
           out.addByte(0);
         }
       }
@@ -366,11 +380,11 @@ Uint8List encodeFont(String name, Map<String, dynamic> json) {
           name, 'char $code has ${rows.length} rows, expected 8');
     }
     for (var y = 0; y < 8; y++) {
-      if (rows[y].length != 8) {
+      if (rows[y].length != spec.w) {
         throw AssetFormatException(name,
-            'char $code row $y length ${rows[y].length}, expected 8');
+            'char $code row $y length ${rows[y].length}, expected ${spec.w}');
       }
-      out.addByte(_packRow(rows[y], 0, name));
+      out.add(fontPackRow(fontRowPixels(rows[y], spec), spec));
     }
   }
   return out.toBytes();

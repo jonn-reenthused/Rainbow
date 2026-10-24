@@ -150,6 +150,95 @@ void main() {
       expect(b.sublist(264, 272), [0x00, 0x3C, 0x66, 0xC3, 0xFF, 0xC3, 0xC3, 0x00]);
       expect(b.sublist(0, 8), List.filled(8, 0));
     });
+
+    test('cpc mode 0 packs 4bpp pairs with the hardware interleave', () {
+      final b = encodeFont('f', {
+        'system': 'cpc',
+        'mode': 0,
+        'chars': {
+          '65': List.filled(8, '11111111'),
+        }
+      });
+      // 96 glyphs x 4 bytes/row x 8
+      expect(b.length, 3072);
+      // px pair (1,1): a->bit 7, b->bit 6 => 0xC0 per byte ('A' at 33*32)
+      expect(b.sublist(1056, 1060), [0xC0, 0xC0, 0xC0, 0xC0]);
+    });
+
+    test('cpc mode 0 hex digits carry full pen values', () {
+      final b = encodeFont('f', {
+        'system': 'cpc',
+        'mode': 0,
+        'chars': {
+          '65': ['f0' * 4, ...List.filled(7, '0' * 8)],
+        }
+      });
+      // (15,0): a=15 -> bits 7,3,5,1 set => 0x80|0x08|0x20|0x02 = 0xAA
+      expect(b[1056], 0xAA);
+    });
+
+    test('cpc mode 1 packs 2bpp pixels four to a byte', () {
+      final b = encodeFont('f', {
+        'system': 'cpc',
+        'mode': 1,
+        'chars': {
+          '65': List.filled(8, '11111111'),
+        }
+      });
+      expect(b.length, 1536);
+      // px value 1 -> bit0 of each pixel slot => 0xF0 per byte ('A' at 33*16)
+      expect(b.sublist(528, 530), [0xF0, 0xF0]);
+    });
+
+    test('cpc mode 2 stays 1bpp', () {
+      final b = encodeFont('f', {
+        'system': 'cpc',
+        'mode': 2,
+        'chars': <String, dynamic>{}
+      });
+      expect(b.length, 768);
+      // 'A' inherits the CPC firmware glyph
+      expect(b.sublist(264, 272),
+          [0x18, 0x3C, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x00]);
+    });
+
+    test('c64 multi forces w4 and packs 2bpp pairs msb-first', () {
+      final b = encodeFont('f', {
+        'system': 'c64',
+        'multi': true,
+        'chars': {
+          '65': List.filled(8, '3333'),
+        }
+      });
+      expect(b.length, 768);
+      expect(b.sublist(264, 272), List.filled(8, 0xFF));
+    });
+
+    test('c64 hires inherits the chargen uppercase set', () {
+      final b =
+          encodeFont('f', {'system': 'c64', 'chars': <String, dynamic>{}});
+      expect(b.sublist(264, 272),
+          [0x18, 0x3C, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00]);
+    });
+
+    test('w4 1bpp glyphs pack into the upper nibble', () {
+      final b = encodeFont('f', {
+        'w': 4,
+        'chars': {
+          '65': List.filled(8, '####'),
+        }
+      });
+      expect(b.sublist(264, 272), List.filled(8, 0xF0));
+    });
+
+    test('rejects unknown system and bad width', () {
+      expect(
+          () => encodeFont('f', {'system': 'msx', 'chars': const {}}),
+          throwsA(isA<AssetFormatException>()));
+      expect(
+          () => encodeFont('f', {'w': 6, 'chars': const {}}),
+          throwsA(isA<AssetFormatException>()));
+    });
   });
 
   group('encodeScreenCbm', () {
