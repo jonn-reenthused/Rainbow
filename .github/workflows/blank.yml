@@ -133,11 +133,16 @@ jobs:
       #   APPLE_ID                    Apple ID email
       #   APPLE_APP_SPECIFIC_PASSWORD app-specific password (appleid.apple.com)
       #   APPLE_TEAM_ID               10-char Apple team ID
+      #   APPLE_SIGNING_IDENTITY      optional — the cert's common name,
+      #                               e.g. "Developer ID Application:
+      #                               jonn blanchard (UM834TG22D)", or its
+      #                               SHA-1. Auto-detected when unset.
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -185,9 +190,13 @@ jobs:
         if: matrix.target == 'macos' && env.APPLE_CERTIFICATE != ''
         run: |
           set -e
-          IDENTITY="$(security find-identity -v -p codesigning \
-            | grep 'Developer ID Application' | head -1 \
-            | sed 's/.*"\(.*\)"/\1/')"
+          if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            IDENTITY="$APPLE_SIGNING_IDENTITY"
+          else
+            IDENTITY="$(security find-identity -v -p codesigning \
+              | grep 'Developer ID Application' | head -1 \
+              | sed 's/.*"\(.*\)"/\1/')"
+          fi
           echo "signing as: $IDENTITY"
           codesign --deep --force --options runtime --timestamp \
             --sign "$IDENTITY" \
