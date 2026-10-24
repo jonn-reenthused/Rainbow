@@ -185,9 +185,7 @@ jobs:
         if: matrix.target == 'macos' && env.APPLE_CERTIFICATE != ''
         run: |
           set -e
-          IDENTITY="$(security find-identity -v -p codesigning \
-            | grep 'Developer ID Application' | head -1 \
-            | sed 's/.*"\(.*\)"/\1/')"
+          IDENTITY="6E87BE4F27D6E3FFC895EF6188C798B5FCFAFF1B"
           echo "signing as: $IDENTITY"
           codesign --deep --force --options runtime --timestamp \
             --sign "$IDENTITY" \
