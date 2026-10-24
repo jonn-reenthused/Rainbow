@@ -57,13 +57,31 @@ the binary — unused files cost nothing.
 ## `.rbf` — font
 
 ```json
-{"name":"main", "chars":{"65":["00111100","01000010",...8 rows]}}
+{"name":"main", "system":"zx", "w":8,
+ "chars":{"65":["00111100","01000010",...8 rows]}}
 ```
 
-- `chars` maps ASCII code (string) → 8 row strings of 8 chars.
-- Glyphs not present **inherit the Spectrum ROM font** — a font file
-  only needs its deltas. `"base":"blank"` opts out (unset = blank).
-- Encoded: 96 glyphs × 8 bytes, glyph index = ascii − 32.
+- `system`: `"zx"` (default, also the v1 format), `"cpc"` or `"c64"` —
+  selects the geometry, pixel depth and stock font the editor offers.
+- `w`: glyph cell width in pixels, `4` or `8` (default 8). Narrow
+  glyphs pack left; CPC mode-0 fonts often use 4 for 40-column text.
+- `mode` (CPC only): screen mode 0/1/2 → glyph pixel depth 4/2/1 bpp.
+  Multibpp rows use a hex digit per pixel (`'0'`..max; `'#'` aliases
+  the max). Encoded with the CPC hardware interleave — mode 0 packs
+  2 px/byte (16 pens), mode 1 packs 4 px/byte (4 pens).
+- `multi` (C64 only): multicolour text — `w` is forced to 4, each
+  pixel is a 2-bit pair packed 4/byte. Pair values: `0`=background,
+  `1`=multi1, `2`=multi2, `3`=colour-RAM foreground.
+- `chars` maps ASCII code (string) → 8 row strings of `w` chars.
+  Glyphs not present **inherit the system ROM font** (Spectrum, CPC
+  firmware or C64 chargen per `system`) — a font file only needs its
+  deltas. `"base":"blank"` opts out (unset = blank).
+- Encoded: 96 glyphs × `ceil(w*bpp/8)` bytes/row × 8 rows, glyph
+  index = ascii − 32. ZX/CPC-m2/C64-hires are 8 bytes/glyph 1bpp.
+
+**Note:** multicolour/width-variant fonts encode correctly but the
+runtimes currently render 8×8 1bpp fonts only — full per-mode font
+rendering is a planned runtime change.
 
 ## `.rbc` — screen
 

@@ -5,13 +5,18 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter/material.dart';
 import 'package:rainbow_assets/rainbow_assets.dart';
 
-import '../spectrum.dart';
-
-/// Editor for `.rbf` font assets: 96 glyphs (ASCII 32-127) x 8x8 pixels.
+/// Editor for `.rbf` font assets: 96 glyphs (ASCII 32-127) on an 8-row
+/// cell whose width, pixel depth and palette depend on the declared
+/// target system/mode:
+///   zx            8/4px, 1bpp
+///   cpc mode 0    8/4px, 4bpp (16 pens, double-wide pixels)
+///   cpc mode 1    8/4px, 2bpp (4 pens)
+///   cpc mode 2    8/4px, 1bpp
+///   c64           8/4px, 1bpp   (+ multi: 4px, 2bpp double-wide)
 ///
-/// The .rbf JSON model: `{chars: {"<ascii>": [8 row strings], ...}}`.
-/// Glyphs without an entry inherit the Spectrum ROM glyph (rendered
-/// dimmed); '#' = set pixel.
+/// The .rbf JSON model: `{system, mode, multi, w, chars: {"ascii":
+/// [8 row strings], ...}}`. Glyphs without an entry inherit the
+/// system's ROM glyph (rendered dimmed).
 class FontEditor extends StatefulWidget {
   const FontEditor({super.key, required this.text, required this.onChanged});
 
@@ -25,6 +30,7 @@ class FontEditor extends StatefulWidget {
 class _FontEditorState extends State<FontEditor> {
   late Map<String, dynamic> _model;
   int _char = 65; // 'A'
+  int _pen = 1;
   String? _parseError;
 
   @override
@@ -39,9 +45,11 @@ class _FontEditorState extends State<FontEditor> {
       _parseError = null;
     } catch (e) {
       _parseError = '$e';
-      _model = {'chars': <String, dynamic>{}};
+      _model = {'system': 'zx', 'chars': <String, dynamic>{}};
     }
   }
+
+  FontSpec get _spec => fontSpec(_model);
 
   Map<String, dynamic> get _chars =>
       _model['chars'] as Map<String, dynamic>? ?? const {};
@@ -50,58 +58,59 @@ class _FontEditorState extends State<FontEditor> {
   List<String>? _glyph(int code) =>
       (_chars['$code'] as List?)?.cast<String>();
 
-  /// 8 bitmap bytes for [code]: edited rows packed, else the ROM glyph.
-  List<int> _glyphBits(int code) {
+  /// Pixel grid (8 rows x spec.w) for [code]: edited rows parsed, else
+  /// the inherited system glyph.
+  List<List<int>> _glyphPx(int code) {
     final rows = _glyph(code);
-    if (rows == null) {
-      return zxFont.sublist((code - 32) * 8, (code - 32) * 8 + 8);
-    }
+    if (rows == null) return fontBasePixels(_spec, code);
     return [
-      for (final r in rows)
-        [
-          for (var x = 0; x < 8; x++)
-            if (pixelKind(r, x) == PixelKind.ink) 0x80 >> x else 0
-        ].fold(0, (a, b) => a | b)
+      for (var y = 0; y < FontSpec.h; y++)
+        fontRowPixels(y < rows.length ? rows[y] : '', _spec)
     ];
   }
+
+  /// Serialise a pixel row back to a row string ('#'/'.' for 1bpp,
+  /// hex digits for multibpp).
+  String _rowOf(List<int> px) => _spec.bpp == 1
+      ? px.map((v) => v != 0 ? '#' : '.').join()
+      : px.map((v) => v.toRadixString(16)).join();
 
   void _commit() {
     widget.onChanged(const JsonEncoder.withIndent('  ').convert(_model));
     setState(() {});
   }
 
-  void _setPixel(int x, int y, String ch) {
+  void _setPixel(int x, int y, int pen) {
     // start from the effective glyph (edited or inherited ROM)
     final g = _glyph(_char) ??
-        [for (final b in _glyphBits(_char)) _byteRow(b)];
+        [for (final px in fontBasePixels(_spec, _char)) _rowOf(px)];
     final row = g[y];
-    g[y] = row.substring(0, x) + ch + row.substring(x + 1);
+    final ch = _spec.bpp == 1
+        ? (pen != 0 ? '#' : '.')
+        : pen.clamp(0, _spec.maxPx).toRadixString(16);
+    g[y] = '${row.substring(0, x)}$ch${row.substring(x + 1)}';
     (_model['chars'] ??= <String, dynamic>{})['$_char'] = g;
   }
 
-  static String _byteRow(int b) =>
-      [for (var x = 0; x < 8; x++) (b & (0x80 >> x)) != 0 ? '#' : '.']
-          .join();
-
-  void _paintAt(Offset local, double cell, String ch) {
-    final x = (local.dx / cell).floor();
-    final y = (local.dy / cell).floor();
-    if (x < 0 || x >= 8 || y < 0 || y >= 8) return;
-    _setPixel(x, y, ch);
+  void _paintAt(Offset local, double cw, double ch, bool erase) {
+    final x = (local.dx / cw).floor();
+    final y = (local.dy / ch).floor();
+    if (x < 0 || x >= _spec.w || y < 0 || y >= FontSpec.h) return;
+    _setPixel(x, y, erase ? 0 : _pen);
     _commit();
   }
 
-  void _pointer(PointerEvent e, double cell) {
+  void _pointer(PointerEvent e, double cw, double ch) {
     if ((e.buttons & kSecondaryMouseButton) != 0) {
-      _paintAt(e.localPosition, cell, '.');
+      _paintAt(e.localPosition, cw, ch, true);
     } else if ((e.buttons & kPrimaryMouseButton) != 0) {
-      _paintAt(e.localPosition, cell, '#');
+      _paintAt(e.localPosition, cw, ch, false);
     }
   }
 
   void _clear() {
     (_model['chars'] ??= <String, dynamic>{})['$_char'] =
-        List.filled(8, '........');
+        List.filled(8, _rowOf(List.filled(_spec.w, 0)));
     _commit();
   }
 
@@ -112,25 +121,35 @@ class _FontEditorState extends State<FontEditor> {
   }
 
   void _invert() {
-    final g = [for (final b in _glyphBits(_char)) _byteRow(~b & 0xFF)];
-    (_model['chars'] ??= <String, dynamic>{})['$_char'] = g;
+    final g = [
+      for (final px in _glyphPx(_char))
+        px.map((v) => v == 0 ? 1 : 0).toList()
+    ];
+    (_model['chars'] ??= <String, dynamic>{})['$_char'] =
+        g.map(_rowOf).toList();
     _commit();
   }
 
   void _shift(int dx, int dy) {
-    final src = _glyphBits(_char);
-    final g = List.filled(8, '........');
+    final src = _glyphPx(_char);
+    final g = List.generate(8, (_) => List.filled(_spec.w, 0));
     for (var y = 0; y < 8; y++) {
-      for (var x = 0; x < 8; x++) {
+      for (var x = 0; x < _spec.w; x++) {
         final sx = x - dx, sy = y - dy;
-        if (sx < 0 || sx >= 8 || sy < 0 || sy >= 8) continue;
-        if ((src[sy] & (0x80 >> sx)) != 0) {
-          final row = g[y];
-          g[y] = '${row.substring(0, x)}#${row.substring(x + 1)}';
-        }
+        if (sx < 0 || sx >= _spec.w || sy < 0 || sy >= 8) continue;
+        g[y][x] = src[sy][sx];
       }
     }
-    (_model['chars'] ??= <String, dynamic>{})['$_char'] = g;
+    (_model['chars'] ??= <String, dynamic>{})['$_char'] =
+        g.map(_rowOf).toList();
+    _commit();
+  }
+
+  void _setSystem(String sys) {
+    _model['system'] = sys;
+    if (sys == 'cpc') _model.remove('multi');
+    if (sys != 'cpc') _model.remove('mode');
+    if (_pen > _spec.maxPx) _pen = _spec.maxPx;
     _commit();
   }
 
@@ -141,7 +160,9 @@ class _FontEditorState extends State<FontEditor> {
           child: Text('invalid font JSON: $_parseError',
               style: const TextStyle(color: Colors.redAccent)));
     }
-    const cell = 20.0;
+    final spec = _spec;
+    const ch = 20.0;
+    final cw = ch * spec.pixelAspect;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -181,7 +202,8 @@ class _FontEditorState extends State<FontEditor> {
                           child: CustomPaint(
                             size: const Size(16, 16),
                             painter: _GlyphThumb(
-                                bits: _glyphBits(code),
+                                px: _glyphPx(code),
+                                spec: spec,
                                 scale: 2,
                                 inherited: inherited),
                           ),
@@ -200,12 +222,12 @@ class _FontEditorState extends State<FontEditor> {
             color: const Color(0xFF101018),
             child: Center(
               child: Listener(
-                onPointerDown: (e) => _pointer(e, cell),
-                onPointerMove: (e) => _pointer(e, cell),
+                onPointerDown: (e) => _pointer(e, cw, ch),
+                onPointerMove: (e) => _pointer(e, cw, ch),
                 child: CustomPaint(
-                  size: const Size(8 * cell, 8 * cell),
+                  size: Size(spec.w * cw, 8 * ch),
                   painter: _GlyphPainter(
-                      bits: _glyphBits(_char), cell: cell),
+                      px: _glyphPx(_char), spec: spec, cw: cw, ch: ch),
                 ),
               ),
             ),
@@ -215,7 +237,7 @@ class _FontEditorState extends State<FontEditor> {
         Material(
           color: const Color(0xFF1B1B24),
           child: Container(
-            width: 150,
+            width: 160,
             padding: const EdgeInsets.all(8),
             child: ListView(
               children: [
@@ -225,10 +247,75 @@ class _FontEditorState extends State<FontEditor> {
                         : 'DEL  ($_char)',
                     style:
                         const TextStyle(fontSize: 12, color: Colors.white70)),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
+                _dropdown<String>(
+                    'system',
+                    spec.system,
+                    const ['zx', 'cpc', 'c64'],
+                    (v) => _setSystem(v!)),
+                if (spec.system == 'cpc')
+                  _dropdown<int>('mode', spec.mode, const [0, 1, 2], (v) {
+                    _model['mode'] = v;
+                    if (_pen > _spec.maxPx) _pen = _spec.maxPx;
+                    _commit();
+                  }),
+                if (spec.system == 'c64')
+                  Row(children: [
+                    Checkbox(
+                        value: spec.multi,
+                        onChanged: (v) {
+                          if (v == true) {
+                            _model['multi'] = true;
+                          } else {
+                            _model.remove('multi');
+                          }
+                          if (_pen > _spec.maxPx) _pen = _spec.maxPx;
+                          _commit();
+                        }),
+                    const Text('multi',
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.white70)),
+                  ]),
+                if (!(spec.system == 'c64' && spec.multi))
+                  _dropdown<int>('width', spec.w, const [8, 4], (v) {
+                    _model['w'] = v;
+                    _commit();
+                  }),
+                const Divider(height: 16, color: Colors.white12),
+                // palette
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (var p = 0; p <= spec.maxPx; p++)
+                      GestureDetector(
+                        onTap: () => setState(() => _pen = p),
+                        child: Container(
+                          width: 24,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: _penColour(p, spec.maxPx),
+                            border: Border.all(
+                                color: p == _pen
+                                    ? const Color(0xFFE0AF68)
+                                    : Colors.white24),
+                          ),
+                          child: spec.bpp > 1
+                              ? Center(
+                                  child: Text(
+                                      p.toRadixString(16).toUpperCase(),
+                                      style: const TextStyle(
+                                          fontSize: 9,
+                                          color: Colors.white70)))
+                              : null,
+                        ),
+                      ),
+                  ],
+                ),
+                const Divider(height: 16, color: Colors.white12),
                 _btn('clear', Icons.clear, _clear),
                 _btn('revert to ROM', Icons.undo, _revert),
-                _btn('invert', Icons.invert_colors, _invert),
+                if (spec.bpp == 1) _btn('invert', Icons.invert_colors, _invert),
                 const Divider(height: 16, color: Colors.white12),
                 _btn('←', Icons.arrow_back, () => _shift(-1, 0)),
                 _btn('→', Icons.arrow_forward, () => _shift(1, 0)),
@@ -239,6 +326,40 @@ class _FontEditorState extends State<FontEditor> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Swatch for palette index [p]: index 0 is dark, the max is white,
+  /// intermediate pens ramp through hues so the palette reads clearly.
+  static Color _penColour(int p, int maxPx) {
+    if (p == 0) return const Color(0xFF16161E);
+    if (p == maxPx) return Colors.white;
+    final hue = 200.0 - (p - 1) * 360.0 / (maxPx > 2 ? maxPx : 2);
+    return HSVColor.fromAHSV(1, hue % 360, 0.75, 0.85).toColor();
+  }
+
+  Widget _dropdown<T>(
+      String label, T value, List<T> items, ValueChanged<T?> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(children: [
+        Text('$label ',
+            style: const TextStyle(fontSize: 10, color: Colors.white54)),
+        Expanded(
+          child: DropdownButton<T>(
+            value: value,
+            isDense: true,
+            isExpanded: true,
+            dropdownColor: const Color(0xFF1B1B24),
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
+            items: [
+              for (final i in items)
+                DropdownMenuItem(value: i, child: Text('$i')),
+            ],
+            onChanged: onChanged,
+          ),
+        ),
+      ]),
     );
   }
 
@@ -259,22 +380,28 @@ class _FontEditorState extends State<FontEditor> {
 
 class _GlyphThumb extends CustomPainter {
   _GlyphThumb(
-      {required this.bits, required this.scale, this.inherited = false});
+      {required this.px,
+      required this.spec,
+      required this.scale,
+      this.inherited = false});
 
-  final List<int> bits;
+  final List<List<int>> px;
+  final FontSpec spec;
   final double scale;
   final bool inherited;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final on = Paint()
-      ..color = inherited ? Colors.white38 : Colors.white70;
-    for (var y = 0; y < 8 && y < bits.length; y++) {
-      for (var x = 0; x < 8; x++) {
-        if ((bits[y] & (0x80 >> x)) != 0) {
-          canvas.drawRect(
-              Rect.fromLTWH(x * scale, y * scale, scale, scale), on);
-        }
+    for (var y = 0; y < 8 && y < px.length; y++) {
+      for (var x = 0; x < px[y].length; x++) {
+        final v = px[y][x];
+        if (v == 0) continue;
+        canvas.drawRect(
+            Rect.fromLTWH(x * scale, y * scale, scale, scale),
+            Paint()
+              ..color = _FontEditorState._penColour(v, spec.maxPx)
+                  .withValues(
+                      alpha: inherited ? 0.4 : 0.9));
       }
     }
   }
@@ -284,22 +411,30 @@ class _GlyphThumb extends CustomPainter {
 }
 
 class _GlyphPainter extends CustomPainter {
-  _GlyphPainter({required this.bits, required this.cell});
+  _GlyphPainter(
+      {required this.px, required this.spec, required this.cw, required this.ch});
 
-  final List<int> bits;
-  final double cell;
+  final List<List<int>> px;
+  final FontSpec spec;
+  final double cw;
+  final double ch;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final on = Paint()..color = Colors.white;
     final off = Paint()..color = const Color(0xFF16161E);
     final grid = Paint()
       ..color = Colors.white12
       ..strokeWidth = 0.5;
     for (var y = 0; y < 8; y++) {
-      for (var x = 0; x < 8; x++) {
-        final r = Rect.fromLTWH(x * cell, y * cell, cell, cell);
-        canvas.drawRect(r, (bits[y] & (0x80 >> x)) != 0 ? on : off);
+      for (var x = 0; x < spec.w; x++) {
+        final r = Rect.fromLTWH(x * cw, y * ch, cw, ch);
+        final v = y < px.length && x < px[y].length ? px[y][x] : 0;
+        canvas.drawRect(
+            r,
+            v == 0
+                ? off
+                : (Paint()
+                  ..color = _FontEditorState._penColour(v, spec.maxPx)));
         canvas.drawRect(r, grid);
       }
     }

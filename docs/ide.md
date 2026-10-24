@@ -4,6 +4,16 @@ The Flutter IDE (`ide/`) is the visual half of Rainbow: project
 management, code editing with live diagnostics, asset editors, and
 one-button build/run.
 
+## Platforms
+
+The IDE runs on macOS, Windows and Linux (`flutter run -d macos`,
+`-d windows`, `-d linux`). Keyboard shortcuts use ⌘ on macOS and
+Ctrl elsewhere; the monospace font is Menlo with a
+Consolas/DejaVu/Liberation fallback chain. Default emulator commands
+are host-OS aware (Fuse, Retro Virtual Machine and MAME are assumed
+on PATH on Windows/Linux, installed apps on macOS) and every one is
+editable in Settings.
+
 ## Projects
 
 - **New** (title bar / ⌘⇧N): pick a parent folder, name the project,

@@ -62,7 +62,15 @@ class RbwEditingController extends TextEditingController {
       final start = lineStarts[t.line - 1] + t.col - 1;
       if (start < pos || start > src.length) continue;
       if (start > pos) spans.add(_plain(src.substring(pos, start)));
-      final end = (start + t.text.length).clamp(0, src.length);
+      var end = (start + t.text.length).clamp(0, src.length);
+      // String tokens hold the contents only — t.col points at the
+      // opening quote, so the span must cover the delimiters too.
+      if (t.kind == TokKind.string &&
+          start < src.length &&
+          src[start] == '"') {
+        if (end < src.length) end++; // opening quote
+        if (end < src.length && src[end] == '"') end++; // closing quote
+      }
       spans.add(_styled(src.substring(start, end), t, lineDeco[t.line]));
       pos = end;
     }

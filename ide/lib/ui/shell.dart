@@ -243,6 +243,16 @@ class _ShellState extends State<Shell> {
     'Import .mus → .ray': ('assets/music', '.ray'),
   };
 
+  /// Font system for new .rbf assets, from the run target's platform.
+  String _fontSystem() {
+    final id = resolveTargetId(widget.state.runTarget);
+    return switch (platformOf(id ?? 48)) {
+      TargetFamily.cpc => 'cpc',
+      TargetFamily.cbm => 'c64',
+      _ => 'zx',
+    };
+  }
+
   String _template(String ext, String name) {
     switch (ext) {
       case '.rbw':
@@ -265,8 +275,14 @@ class _ShellState extends State<Shell> {
         return const JsonEncoder.withIndent('  ')
             .convert({'w': 32, 'h': 20, 'map': List.filled(640, 0)});
       case '.rbf':
-        return const JsonEncoder.withIndent('  ')
-            .convert({'name': name, 'chars': <String, dynamic>{}});
+        final sys = _fontSystem();
+        return const JsonEncoder.withIndent('  ').convert({
+          'name': name,
+          'system': sys,
+          if (sys == 'cpc') 'mode': 1,
+          'w': 8,
+          'chars': <String, dynamic>{},
+        });
       case '.rbc':
         return const JsonEncoder.withIndent('  ')
             .convert({'bitmap': '00' * 6144, 'attrs': '38' * 768});
