@@ -100,6 +100,7 @@ MAIN:
   PAPER 0
   INK 7
   CLS
+  CHARSET "test"
   PRINTAT 8, 11, "M U N C H E R"
   PRINTAT 11, 3, "o/p q/a to steer the muncher"
   PRINTAT 13, 3, "clear the maze of 226 dots"

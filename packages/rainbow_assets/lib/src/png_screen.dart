@@ -61,6 +61,28 @@ const _bright = [
 List<int> _rgb(int index, bool bright) =>
     (bright ? _bright : _normal)[index.clamp(0, 7)];
 
+/// Decode an image file and convert to `.rbs` frame rows sized [w]×[h]:
+/// pixels at/above [alphaThreshold] become '#' (ink), the rest '.'
+/// (transparent). The image is resized to the cell if its dimensions
+/// differ. Throws [FormatException] if undecodable.
+List<String> imageToSpriteRows(Uint8List imageBytes,
+    {required int w, required int h, int alphaThreshold = 128}) {
+  var source = img.decodeImage(imageBytes);
+  if (source == null) {
+    throw const FormatException('could not decode image');
+  }
+  if (source.width != w || source.height != h) {
+    source = img.copyResize(source, width: w, height: h);
+  }
+  return [
+    for (var y = 0; y < h; y++)
+      [
+        for (var x = 0; x < w; x++)
+          source.getPixel(x, y).a >= alphaThreshold ? '#' : '.'
+      ].join()
+  ];
+}
+
 /// Decode an image file (PNG, GIF, JPEG...) and convert to 6912 bytes of
 /// Spectrum screen data. Throws [FormatException] if undecodable.
 Uint8List imageToScreen(Uint8List imageBytes,

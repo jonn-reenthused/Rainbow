@@ -1043,6 +1043,8 @@ class _ShellState extends State<Shell> {
         key: k,
         text: doc.text,
         onChanged: onChanged,
+        projectDir: s.projectDir!,
+        relPath: doc.relPath,
       );
     }
     if (path.endsWith('.rbt')) {

@@ -206,7 +206,8 @@ effects are listed in the report output.
 
 `musToRay` (IDE `+` → *Import .mus → .ray*, or
 `rainbow import-mus file.mus out.ray`) converts Compute! Sidplayer
-`.mus` songs (type B / Enhanced, e.g. the CGSC collection) to `.ray`: the three voice streams — two-byte note and
+`.mus` songs (type B / Enhanced, e.g. the CGSC collection in
+`docs/CGSC`) to `.ray`: the three voice streams — two-byte note and
 command pairs — are decoded into a shared 50 Hz frame grid and
 quantised to `.ray` rows.
 

@@ -36,7 +36,11 @@ void main() {
     testWidgets('renders frames and emits edited JSON', (tester) async {
       String? out;
       await tester.pumpWidget(
-        host(SpriteEditor(text: spriteJson, onChanged: (t) => out = t)),
+        host(SpriteEditor(
+            text: spriteJson,
+            onChanged: (t) => out = t,
+            projectDir: '/nonexistent',
+            relPath: 'assets/sprites/test.rbs')),
       );
       expect(find.text('16×16  frame 1/2'), findsOneWidget);
       expect(find.text('frame 1'), findsOneWidget);
@@ -58,7 +62,11 @@ void main() {
     testWidgets('add/duplicate/delete frames', (tester) async {
       String? out;
       await tester.pumpWidget(
-        host(SpriteEditor(text: spriteJson, onChanged: (t) => out = t)),
+        host(SpriteEditor(
+            text: spriteJson,
+            onChanged: (t) => out = t,
+            projectDir: '/nonexistent',
+            relPath: 'assets/sprites/test.rbs')),
       );
       await tester.tap(find.text('add frame'));
       await tester.pump();
