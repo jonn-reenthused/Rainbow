@@ -1,8 +1,6 @@
 import 'dart:io';
 
 import 'package:rainbow_compiler/rainbow_compiler.dart';
-import 'package:rainbow_compiler/src/ast.dart';
-import 'package:rainbow_compiler/src/codegen.dart';
 import 'package:rainbow_compiler/src/parser.dart';
 import 'package:rainbow_compiler/src/sema.dart';
 import 'package:test/test.dart';
@@ -45,8 +43,7 @@ void main() {
           asmFile.writeAsStringSync(asm);
         } else {
           expect(asm.trim(), asmFile.readAsStringSync().trim(),
-              reason:
-                  'golden drift for $name — run UPDATE_GOLDENS=1 dart test '
+              reason: 'golden drift for $name — run UPDATE_GOLDENS=1 dart test '
                   'test/golden_test.dart if intentional');
         }
       });
