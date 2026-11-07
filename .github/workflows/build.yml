@@ -116,14 +116,20 @@ jobs:
             target: linux
             artifact_name: rainbow-linux-x64
             artifact_file: rainbow-linux-x64.tar.gz
+            cli_out: staging/rainbow/rainbow
           - os: windows-latest
             target: windows
             artifact_name: rainbow-windows-x64
             artifact_file: rainbow-windows-x64.zip
+            cli_out: staging/rainbow/rainbow.exe
           - os: macos-latest
             target: macos
             artifact_name: rainbow-macos-arm64
             artifact_file: rainbow-macos-arm64.zip
+            # The CLI lives inside the .app so the signing/notarization
+            # steps below cover it too.
+            cli_out: >-
+              ide/build/macos/Build/Products/Release/rainbow_ide.app/Contents/MacOS/rainbow
     runs-on: ${{ matrix.os }}
     env:
       # macOS signing secrets (all optional — absent means unsigned build):
@@ -167,6 +173,16 @@ jobs:
       - name: Build desktop target
         run: flutter build ${{ matrix.target }} --release
         working-directory: ide
+
+      - name: Compile CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${{ matrix.cli_out }}")"
+          dart pub get -C packages/rainbow_assets
+          dart pub get -C packages/rainbow_compiler
+          dart compile exe packages/rainbow_compiler/bin/rainbow.dart \
+            -o "${{ matrix.cli_out }}"
 
       - name: Import signing certificate
         if: matrix.target == 'macos' && env.APPLE_CERTIFICATE != ''
@@ -219,17 +235,38 @@ jobs:
             --team-id "$APPLE_TEAM_ID" --wait
           xcrun stapler staple rainbow_ide.app
 
-      - name: Archive Linux bundle
+      # Assemble the distribution: the app payload, the CLI, the
+      # example projects (source only — no build/ output, memory dumps
+      # or logs) and the docs, all under a top-level rainbow/ dir so
+      # archives unpack to a single self-contained folder.
+      - name: Stage distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging/rainbow/examples
+          case '${{ matrix.target }}' in
+            linux)   cp -a ide/build/linux/x64/release/bundle/. staging/rainbow/ ;;
+            windows) cp -a "ide/build/windows/x64/runner/Release/." staging/rainbow/ ;;
+            macos)   ditto "ide/build/macos/Build/Products/Release/rainbow_ide.app" staging/rainbow/rainbow_ide.app ;;
+          esac
+          tar -cf - -C examples \
+            --exclude='build' --exclude='.DS_Store' \
+            --exclude='*.log' --exclude='*.bin' . \
+            | tar -xf - -C staging/rainbow/examples
+          cp -R docs staging/rainbow/docs
+          cp README.md staging/rainbow/README.md
+
+      - name: Archive Linux distribution
         if: matrix.target == 'linux'
-        run: tar -czf ${{ matrix.artifact_file }} -C ide/build/linux/x64/release/bundle .
+        run: tar -czf ${{ matrix.artifact_file }} -C staging rainbow
 
-      - name: Archive Windows build
+      - name: Archive Windows distribution
         if: matrix.target == 'windows'
-        run: Compress-Archive -Path "ide/build/windows/x64/runner/Release/*" -DestinationPath "${{ matrix.artifact_file }}"
+        run: Compress-Archive -Path "staging/rainbow" -DestinationPath "${{ matrix.artifact_file }}"
 
-      - name: Archive macOS app
+      - name: Archive macOS distribution
         if: matrix.target == 'macos'
-        run: ditto -c -k --sequesterRsrc --keepParent "ide/build/macos/Build/Products/Release/rainbow_ide.app" "${{ matrix.artifact_file }}"
+        run: ditto -c -k --sequesterRsrc --keepParent staging/rainbow "${{ matrix.artifact_file }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
