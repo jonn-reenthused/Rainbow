@@ -561,18 +561,23 @@ class IdeState extends ChangeNotifier {
     building = true;
     log.add('── build ${DateTime.now().toString().substring(11, 19)} ──');
     notifyListeners();
-    final r = await buildProject(projectDir!,
-        sources: mergedSources(),
-        pasmo: pasmoPath,
-        targetName: targetKeys.isNotEmpty ? runTarget : null,
-        target: targetKeys.isEmpty && runTarget != null
-            ? resolveTargetId(runTarget!)
-            : null);
-    log.addAll(r.log);
-    lastTap = r.tapPath;
-    lastTapTarget = r.tapTarget;
-    building = false;
-    recompile();
+    try {
+      final r = await buildProject(projectDir!,
+          sources: mergedSources(),
+          pasmo: pasmoPath,
+          targetName: targetKeys.isNotEmpty ? runTarget : null,
+          target: targetKeys.isEmpty && runTarget != null
+              ? resolveTargetId(runTarget!)
+              : null);
+      log.addAll(r.log);
+      lastTap = r.tapPath;
+      lastTapTarget = r.tapTarget;
+    } catch (e) {
+      log.add('build failed: $e');
+    } finally {
+      building = false;
+      recompile();
+    }
   }
 
   /// Build and run. [runTarget] selects the platform: a `targets` map key
@@ -584,18 +589,23 @@ class IdeState extends ChangeNotifier {
     building = true;
     log.add('── build ${DateTime.now().toString().substring(11, 19)} ──');
     notifyListeners();
-    final r = await buildProject(projectDir!,
-        sources: mergedSources(),
-        pasmo: pasmoPath,
-        targetName: targetKeys.isNotEmpty ? runTarget : null,
-        target: targetKeys.isEmpty && runTarget != null
-            ? resolveTargetId(runTarget!)
-            : null);
-    log.addAll(r.log);
-    lastTap = r.tapPath;
-    lastTapTarget = r.tapTarget;
-    building = false;
-    recompile();
+    try {
+      final r = await buildProject(projectDir!,
+          sources: mergedSources(),
+          pasmo: pasmoPath,
+          targetName: targetKeys.isNotEmpty ? runTarget : null,
+          target: targetKeys.isEmpty && runTarget != null
+              ? resolveTargetId(runTarget!)
+              : null);
+      log.addAll(r.log);
+      lastTap = r.tapPath;
+      lastTapTarget = r.tapTarget;
+    } catch (e) {
+      log.add('build failed: $e');
+    } finally {
+      building = false;
+      recompile();
+    }
     if (lastTap == null || !File(lastTap!).existsSync()) return;
     final family = platformOf(lastTapTarget ?? 48);
     final cpc = family == TargetFamily.cpc;
@@ -643,8 +653,10 @@ class IdeState extends ChangeNotifier {
     notifyListeners();
     try {
       await (Platform.isWindows
-          ? Process.start('cmd', ['/d', '/c', cmd])
-          : Process.start('/bin/sh', ['-c', cmd]));
+          ? Process.start('cmd', ['/d', '/c', cmd],
+              environment: toolEnvironment())
+          : Process.start('/bin/sh', ['-c', cmd],
+              environment: toolEnvironment()));
     } catch (e) {
       log.add('run failed: $e');
       notifyListeners();
