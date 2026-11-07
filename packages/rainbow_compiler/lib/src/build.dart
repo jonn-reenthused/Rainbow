@@ -918,17 +918,16 @@ Future<({bool ok, String? artifact, int? target})> _buildOne(
     // outDir on a bare name with no extension so the CDT block is "HELLO",
     // then rename to the real .cdt artifact.
     final asmBase = asmPath.split('/').last;
-    final r = await Process.run(
-        pasmo, ['--alocal', '--cdtbas', asmBase, name],
+    final r = await runTool(pasmo, ['--alocal', '--cdtbas', asmBase, name],
         workingDirectory: outDir);
-    if (r.stdout.toString().isNotEmpty) {
-      log.add(r.stdout.toString().trimRight());
+    if (r.out.isNotEmpty) {
+      log.add(r.out.trimRight());
     }
-    if (r.stderr.toString().isNotEmpty) {
-      log.add(r.stderr.toString().trimRight());
+    if (r.err.isNotEmpty) {
+      log.add(r.err.trimRight());
     }
-    if (r.exitCode != 0) {
-      log.add('pasmo failed (${r.exitCode}) — see $asmPath');
+    if (r.code != 0) {
+      log.add('pasmo failed (${r.code}) — see $asmPath');
       return (ok: false, artifact: null, target: null);
     }
     File('$outDir/$name').renameSync(cdtPath);

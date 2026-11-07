@@ -299,6 +299,46 @@ CompileResult _compile6502(
       asm: buf.toString(), info: info, usedModules: used);
 }
 
+/// Environment for spawning external toolchain executables.
+/// GUI-launched apps (Finder, .desktop shortcuts) inherit a minimal
+/// PATH — typically /usr/bin:/bin:/usr/sbin:/sbin — without the
+/// locations where pasmo/cc65 usually live, so a bare tool name can't
+/// be resolved. Appending the usual toolchain dirs keeps terminal
+/// behaviour unchanged while making bare names work for GUI apps too.
+Map<String, String> toolEnvironment() {
+  final path = Platform.environment['PATH'] ?? '';
+  return {
+    'PATH': '$path:/opt/homebrew/bin:/opt/local/bin:/usr/local/bin'
+  };
+}
+
+/// Process.run for a toolchain executable, mapping "executable not
+/// found" to a readable error tuple instead of a ProcessException the
+/// caller would have to catch.
+Future<({int code, String out, String err})> runTool(
+  String exe,
+  List<String> args, {
+  String? workingDirectory,
+}) async {
+  try {
+    final r = await Process.run(exe, args,
+        environment: toolEnvironment(),
+        workingDirectory: workingDirectory);
+    return (
+      code: r.exitCode,
+      out: r.stdout.toString(),
+      err: r.stderr.toString(),
+    );
+  } on ProcessException catch (e) {
+    return (
+      code: 127,
+      out: '',
+      err: 'cannot run "$exe": ${e.message}. Install the tool and make '
+          'sure it is on PATH, or set an explicit path in Settings.'
+    );
+  }
+}
+
 /// Assemble a Pasmo source file to binary via the pasmo executable.
 Future<({int code, String out, String err})> runPasmo(
   String asmPath,
@@ -308,12 +348,7 @@ Future<({int code, String out, String err})> runPasmo(
 }) async {
   final args = ['--alocal', '--bin', asmPath, binPath];
   if (symPath != null) args.add(symPath);
-  final r = await Process.run(pasmo, args);
-  return (
-    code: r.exitCode,
-    out: r.stdout.toString(),
-    err: r.stderr.toString(),
-  );
+  return runTool(pasmo, args);
 }
 
 /// Assemble a ca65 source file to an object file via the ca65
@@ -323,12 +358,7 @@ Future<({int code, String out, String err})> runCa65(
   String objPath, {
   String ca65 = 'ca65',
 }) async {
-  final r = await Process.run(ca65, [asmPath, '-o', objPath]);
-  return (
-    code: r.exitCode,
-    out: r.stdout.toString(),
-    err: r.stderr.toString(),
-  );
+  return runTool(ca65, [asmPath, '-o', objPath]);
 }
 
 /// Link a ca65 object file to a flat binary via the ld65 executable
@@ -340,13 +370,8 @@ Future<({int code, String out, String err})> runLd65(
   String mapPath, {
   String ld65 = 'ld65',
 }) async {
-  final r = await Process.run(
+  return runTool(
       ld65, ['-C', cfgPath, objPath, '-o', binPath, '-m', mapPath]);
-  return (
-    code: r.exitCode,
-    out: r.stdout.toString(),
-    err: r.stderr.toString(),
-  );
 }
 
 /// Linker config for a C64/C128 flat binary: CODE placed at [org]
