@@ -114,6 +114,7 @@ class Sema {
       'ZX': platformOf(info.target) == TargetFamily.zx ? 1 : 0,
       'CPC': platformOf(info.target) == TargetFamily.cpc ? 1 : 0,
       'CBM': platformOf(info.target) == TargetFamily.cbm ? 1 : 0,
+      'MSX': platformOf(info.target) == TargetFamily.msx ? 1 : 0,
       'BANKED': bankCapableOf(info.target) ? 1 : 0,
       for (final t in kTargetNames.keys)
         kTargetNames[t]!.toUpperCase(): t == info.target ? 1 : 0,
@@ -549,18 +550,50 @@ class Sema {
       case LocateStmt l:
         t(l.row);
         t(l.colExpr);
+      case InputStmt i:
+        if (i.prompt != null && i.prompt is! StrLit) {
+          diag.error(unit.file, i.line, i.col,
+              'INPUT prompt must be a string literal');
+        }
+        final v = i.target;
+        if (v is! VarExpr) {
+          diag.error(unit.file, i.line, i.col,
+              'INPUT target must be a byte array');
+        } else {
+          final sym = scope[v.name];
+          if (sym == null ||
+              sym.kind != SymKind.arraySym ||
+              sym.type != RType.byte) {
+            diag.error(unit.file, i.line, i.col,
+                'INPUT target must be a DIM\'d BYTE array');
+          }
+        }
       case Arg1Stmt a:
         t(a.arg);
         if (a.kind == 'MODE') {
-          if (platformOf(info.target) == TargetFamily.zx) {
+          final fam = platformOf(info.target);
+          if (fam == TargetFamily.zx) {
             diag.warn(unit.file, s.line, s.col,
                 'MODE has no effect on ZX targets '
                 '(no hardware screen modes)');
           }
           final v = evalConst(a.arg);
-          if (v != null && (v < 0 || v > 2)) {
-            diag.warn(unit.file, s.line, s.col,
-                'MODE $v is out of range (0-2)');
+          if (v != null) {
+            // logical mode indices: cpc 0-2 (hardware modes), cbm 0-1
+            // (text/hires bitmap), msx 0-1 where mode 1 (Screen 5)
+            // needs the V9938 — msx1 stays in Screen 2 only.
+            final maxMode = switch (fam) {
+              TargetFamily.cpc => 2,
+              TargetFamily.msx => info.target == 32 ? 1 : 0,
+              _ => 1,
+            };
+            if (v < 0 || v > maxMode) {
+              diag.warn(unit.file, s.line, s.col,
+                  fam == TargetFamily.msx && info.target != 32
+                      ? 'MODE $v has no effect on MSX1 targets '
+                          '(mode 1 needs MSX2)'
+                      : 'MODE $v is out of range (0-$maxMode)');
+            }
           }
         }
       case PokeStmt p:
@@ -831,6 +864,7 @@ const _builtins = <String, _Builtin>{
   'JOY': _Builtin(0, RType.byte),
   'JOYFIRE': _Builtin(0, RType.byte),
   'INKEY': _Builtin(0, RType.byte),
+  'MATCH': _Builtin(2, RType.byte),
   'IN': _Builtin(1, RType.byte),
   'ABS': _Builtin(1, RType.uint),
   'MIN': _Builtin(2, RType.byte),

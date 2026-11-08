@@ -100,6 +100,10 @@ class IdeState extends ChangeNotifier {
   /// RAM banking is a no-op and banked carts can't load their pages.
   String emulatorCmdCpcCpr = 'mame cpc6128p -cart {file}';
 
+  /// MSX command — openMSX autodetects `.rom` (cartridge) and `.cas`
+  /// (cassette) by extension, so a single command covers both media.
+  String emulatorCmdMsx = 'openmsx {file}';
+
   String pasmoPath = 'pasmo';
 
   /// `targets` map keys of the loaded project (empty for flat manifests);
@@ -131,6 +135,7 @@ class IdeState extends ChangeNotifier {
       TargetFamily.cpc => id == 464
           ? const ['auto', 'tape', 'cartridge']
           : const ['auto', 'tape', 'disk', 'cartridge'],
+      TargetFamily.msx => const ['auto', 'tape', 'cartridge'],
       TargetFamily.zx => id == 3
           ? const ['auto', 'tape', 'disk', 'cartridge']
           : const ['auto', 'tape', 'cartridge'],
@@ -166,6 +171,7 @@ class IdeState extends ChangeNotifier {
         prefs.getString('emulatorCmdCart') ?? emulatorCmdCart;
     emulatorCmdCpcCpr =
         prefs.getString('emulatorCmdCpcCpr') ?? emulatorCmdCpcCpr;
+    emulatorCmdMsx = prefs.getString('emulatorCmdMsx') ?? emulatorCmdMsx;
     runMedia = prefs.getString('runMedia') ?? runMedia;
     // migrate the old hardcoded 48K default so 128K projects get the
     // right machine; custom commands are left untouched
@@ -256,6 +262,7 @@ class IdeState extends ChangeNotifier {
     await prefs.setString('emulatorCmdCbmPrg', emulatorCmdCbmPrg);
     await prefs.setString('emulatorCmdCart', emulatorCmdCart);
     await prefs.setString('emulatorCmdCpcCpr', emulatorCmdCpcCpr);
+    await prefs.setString('emulatorCmdMsx', emulatorCmdMsx);
     await prefs.setString('runMedia', runMedia);
     await prefs.setString('pasmoPath', pasmoPath);
   }
@@ -610,6 +617,7 @@ class IdeState extends ChangeNotifier {
     final family = platformOf(lastTapTarget ?? 48);
     final cpc = family == TargetFamily.cpc;
     final cbm = family == TargetFamily.cbm;
+    final msx = family == TargetFamily.msx;
     var pick = _mediaFile(lastTap!, lastTapTarget ?? 48, runMedia);
     if (pick == null && runMedia != 'auto') {
       log.add('no $runMedia image beside '
@@ -620,7 +628,9 @@ class IdeState extends ChangeNotifier {
     final ext = lastTap!.split('.').last.toLowerCase();
     final machine = cbm
         ? (lastTapTarget == 1280 ? 'c128' : 'c64p')
-        : cpc
+        : msx
+            ? (lastTapTarget == 32 ? 'msx2' : 'msx')
+            : cpc
             ? targetNameOf(lastTapTarget ?? 464)
             : switch (lastTapTarget) {
                 128 => '128',
@@ -634,7 +644,9 @@ class IdeState extends ChangeNotifier {
                 'prg' => emulatorCmdCbmPrg,
                 _ => emulatorCmdCbm,
               }
-            : cpc
+            : msx
+                ? emulatorCmdMsx
+                : cpc
                 ? switch (ext) {
                     'dsk' => emulatorCmdCpcDsk,
                     'cpr' => emulatorCmdCpcCpr,
@@ -674,9 +686,16 @@ class IdeState extends ChangeNotifier {
     final base = artifact.replaceFirst(
         RegExp(r'\.[a-z0-9]+$', caseSensitive: false), '');
     final exts = switch (media) {
-      'auto' =>
-        fam == TargetFamily.cbm ? const ['.d71', '.d64', '.tap'] : const [],
-      'tape' => fam == TargetFamily.cpc ? const ['.cdt'] : const ['.tap'],
+      'auto' => fam == TargetFamily.cbm
+          ? const ['.d71', '.d64', '.tap']
+          : fam == TargetFamily.msx
+              ? const ['.rom', '.cas']
+              : const [],
+      'tape' => fam == TargetFamily.cpc
+          ? const ['.cdt']
+          : fam == TargetFamily.msx
+              ? const ['.cas']
+              : const ['.tap'],
       'disk' => fam == TargetFamily.cbm
           ? const ['.d71', '.d64']
           : const ['.dsk'],

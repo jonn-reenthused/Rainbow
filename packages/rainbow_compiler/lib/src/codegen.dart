@@ -267,6 +267,15 @@ class CodeGen {
     // rbt_waitkey/rbt_end — advances AY music when that module is used.
     _lbl('rbt_hook_frame');
     _i(usedModules.contains('ay') ? 'jp\trbt_ay_tick' : 'ret');
+    // mode hook (msx): called by rbt_scrmode after a MODE switch so the
+    // sprite module can re-upload its tables for the new screen — stub
+    // when sprites aren't linked (or on msx1, where MODE can't switch).
+    if (platformOf(info.target) == TargetFamily.msx) {
+      _lbl('rbt_hook_mode');
+      _i(info.target == 32 && usedModules.contains('sprite')
+          ? 'jp\trbt_sp_remode'
+          : 'ret');
+    }
     _raw('\tend\trbt_start');
     return code + _out.toString();
   }
@@ -405,6 +414,9 @@ class CodeGen {
         _cmt(s);
         final lbl = g.name == 'MAIN' ? 'rb_main' : 'rb_${g.name.toLowerCase()}';
         _i(g.isGosub ? 'call\t$lbl' : 'jp\t$lbl');
+      case InputStmt i:
+        _cmt(s);
+        _genInput(i);
       case PrintStmt p:
         _cmt(s);
         _genPrint(p);
@@ -455,6 +467,8 @@ class CodeGen {
           _genWord(r.seed!);
         } else if (platformOf(info.target) == TargetFamily.cpc) {
           _i('call\t#bd0d');    // KL TIME PLEASE -> HL = firmware clock
+        } else if (platformOf(info.target) == TargetFamily.msx) {
+          _i('ld\thl,(rbt_framectr)'); // runtime frame counter (no sysvar)
         } else {
           _i('ld\thl,(#5c78)');
         }
@@ -561,16 +575,21 @@ class CodeGen {
 
   /// MUSIC "name" / MUSIC STOP / MUSIC TICK.
   /// 48K: blocking AntEater beeper engine (MUSIC STOP/TICK warn + no-op).
-  /// 128K/+3/CPC: AY player, auto-ticked on vsync/pause via
+  /// 128K/+3/CPC/MSX: AY player, auto-ticked on vsync/pause via
   /// rbt_hook_frame. On CPC both .ray and .rnt assets arrive in .ray
-  /// format (the encoder converts AntEater counters to AY periods).
+  /// format (the encoder converts AntEater counters to AY periods);
+  /// MSX does the same at its ~1.79 MHz PSG clock.
   void _genMusic(MusicStmt ms, Stmt s) {
     final cpc = platformOf(info.target) == TargetFamily.cpc;
-    final ay = info.target == 128 || info.target == 3 || cpc;
+    final msx = platformOf(info.target) == TargetFamily.msx;
+    final ay = info.target == 128 || info.target == 3 || cpc || msx;
+    // Only ZX re-pages the song bank inside the AY tick; CPC and MSX
+    // have no banked-asset path that needs it.
+    final tickBanks = platformOf(info.target) == TargetFamily.zx;
     switch (ms.op) {
       case 'PLAY':
         usedModules.add(ay ? 'ay' : 'ant');
-        if (ay && !cpc) {
+        if (ay && tickBanks) {
           usedModules.add('bank'); // tick re-pages the song bank
         }
         _loadAssetPtr(s, ms.asset!);
@@ -581,7 +600,7 @@ class CodeGen {
               'MUSIC STOP has no effect on a 48K blocking tune');
         } else {
           usedModules.add('ay');
-          if (!cpc) usedModules.add('bank');
+          if (tickBanks) usedModules.add('bank');
           _i('call\trbt_ay_stop');
         }
       case 'TICK':
@@ -590,7 +609,7 @@ class CodeGen {
               'MUSIC TICK is only needed on a 128K AY tune');
         } else {
           usedModules.add('ay');
-          if (!cpc) usedModules.add('bank');
+          if (tickBanks) usedModules.add('bank');
           _i('call\trbt_ay_tick');
         }
     }
@@ -1254,6 +1273,18 @@ class CodeGen {
         usedModules.add('input');
         _i('call\trbt_inkey');
         return RType.byte;
+      case 'MATCH':
+        // MATCH(buf, "literal") -> 1 if the NUL-terminated buffer equals
+        // the length-prefixed literal.
+        if (c.args.isNotEmpty && c.args[0] is VarExpr) {
+          final sym = _scope[(c.args[0] as VarExpr).name]!;
+          _i('ld\thl,${sym.asmLabel}');
+        }
+        if (c.args.length > 1 && c.args[1] is StrLit) {
+          _i('ld\tde,rbs_${_strIndex((c.args[1] as StrLit).text)}');
+        }
+        _i('call\trbt_match');
+        return RType.byte;
       case 'IN':
         _genWord(c.args[0]);
         _i('ld\tb,h');
@@ -1387,6 +1418,22 @@ class CodeGen {
       i = _strings.length - 1;
     }
     return i;
+  }
+
+  void _genInput(InputStmt st) {
+    usedModules.add('input');
+    usedModules.add('charset');
+    if (st.prompt case StrLit p) {
+      _i('ld\thl,rbs_${_strIndex(p.text)}');
+      _i('call\trbt_print_str');
+    }
+    final v = st.target;
+    if (v is VarExpr) {
+      final sym = _scope[v.name]!;
+      _i('ld\thl,${sym.asmLabel}');
+      _i('ld\tb,${sym.size! - 1}');
+    }
+    _i('call\trbt_input');
   }
 
   void _genPrint(PrintStmt p) {

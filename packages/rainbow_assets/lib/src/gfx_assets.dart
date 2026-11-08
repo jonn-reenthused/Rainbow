@@ -628,3 +628,155 @@ const cbmGfxEncoders = <String, GfxEncoder>{
   '.rsf': encodeRsfCbm,
   '.ray': encodeRayCbm,
 };
+
+/// ZX attr nibble -> MSX palette colour. Index = ink/paper 0-7 | bright<<3.
+/// MSX palette: 1 blk, 2 medgrn, 3 ltgrn, 4 dkblu, 5 ltblu, 6 dkred,
+/// 7 cyn, 8 medred, 9 ltred, 10 dkyel, 11 ltyel, 12 dkgrn, 13 mag,
+/// 14 gry, 15 wht.
+const _zx2msxColour = [
+  1, 4, 6, 13, 12, 7, 10, 14,
+  1, 5, 9, 13, 3, 7, 11, 15,
+];
+
+/// Encode a sprite asset for the MSX (TMS9918) runtime.
+///
+/// MSX1 hardware sprites are 16x16 1bpp: 4 octant patterns of 8 bytes
+/// (top-left, bottom-left, top-right, bottom-right) = 32 bytes per
+/// pattern, one colour per SAT entry (no per-line colour until MSX2).
+/// The source is clipped/padded into a 16x16 window per frame.
+///
+/// Layout (read by runtime/msx/rbt_sprite.asm):
+///   defb w           ; source width in pixels (collision bbox)
+///   defb h           ; source height in pixels
+///   defb nframes
+///   defb colour      ; MSX colour nibble (ZX attr ink + bright<<3)
+///   per frame: 32 bytes — TL, BL, TR, BR octants, MSB = leftmost
+///
+/// 'o'/paper pixels are transparent on hardware sprites.
+Uint8List encodeSpriteMsx(String name, Map<String, dynamic> json) {
+  final w = json['w'] as int? ?? 0;
+  final h = json['h'] as int? ?? 0;
+  if (w <= 0 || w > 248 || w % 8 != 0) {
+    throw AssetFormatException(
+        name, 'w must be a positive multiple of 8 (<=248)');
+  }
+  if (h <= 0 || h > 192) {
+    throw AssetFormatException(name, 'h must be 1..192');
+  }
+  final frames = json['frames'] as List? ?? const [];
+  if (frames.isEmpty || frames.length > 255) {
+    throw AssetFormatException(name, 'need 1..255 frames');
+  }
+  final a = json['attr'];
+  final ai = a is int ? a : 0x38;
+  final colour = a is String && a == 'none'
+      ? 15
+      : _zx2msxColour[(ai & 7) | ((ai >> 3) & 8)];
+  final out = BytesBuilder(copy: false)
+    ..addByte(w)
+    ..addByte(h)
+    ..addByte(frames.length)
+    ..addByte(colour);
+  for (var f = 0; f < frames.length; f++) {
+    final rows = _frameRows(json, f, name);
+    if (rows.length != h) {
+      throw AssetFormatException(
+          name, 'frame $f has ${rows.length} rows, expected $h');
+    }
+    for (final r in rows) {
+      if (r.length != w) {
+        throw AssetFormatException(
+            name, 'frame $f row length ${r.length}, expected $w');
+      }
+    }
+    for (final q in const [0, 1, 2, 3]) {
+      // octant q: x0 = (q&1)*8, y0 = (q>>1)*8... MSX order is
+      // TL, BL, TR, BR -> q maps to (x0,y0): 0=(0,0) 1=(0,8) 2=(8,0) 3=(8,8)
+      final x0 = (q == 2 || q == 3) ? 8 : 0;
+      final y0 = (q == 1 || q == 3) ? 8 : 0;
+      for (var y = 0; y < 8; y++) {
+        var b = 0;
+        for (var px = 0; px < 8; px++) {
+          final sy = y0 + y;
+          final sx = x0 + px;
+          if (sy >= h || sx >= w) continue;
+          final c = rows[sy][sx];
+          switch (c) {
+            case '#' || 'X' || 'x' || '1' || '*':
+              b |= 0x80 >> px;
+            case 'o' || 'O' || '.' || '0' || ' ':
+              break; // transparent on a hardware sprite
+            default:
+              throw AssetFormatException(
+                  name, 'invalid pixel char "$c" (use . o #)');
+          }
+        }
+        out.addByte(b);
+      }
+    }
+  }
+  return out.toBytes();
+}
+
+/// Encode a screen asset for the MSX: Spectrum bitmap+attrs repacked to
+/// the Screen 2 pattern/colour tables SHOWPIC blits — the identity name
+/// table means cell (r,c) owns pattern r*32+c, so the output is 6144
+/// pattern bytes in linear cell order then 6144 colour bytes (each
+/// cell's fg<<4|bg replicated over its 8 pattern rows). FLASH swaps
+/// fg/bg at runtime via the attr byte's bit 7 — but a static screen
+/// has no frame timing, so FLASH cells encode a swapped-nibble marker
+/// the runtime can leave alone; simply fold it like bright for now.
+Uint8List encodeScreenMsx(String name, Map<String, dynamic> json) {
+  Uint8List hex(String key, int want) {
+    final s = (json[key] as String? ?? '').replaceAll(RegExp(r'\s'), '');
+    if (s.length != want * 2) {
+      throw AssetFormatException(
+          name, '"$key" is ${s.length ~/ 2} bytes, expected $want');
+    }
+    final out = Uint8List(want);
+    for (var i = 0; i < want; i++) {
+      out[i] = int.parse(s.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return out;
+  }
+
+  final bm = hex('bitmap', 6144);
+  final at = hex('attrs', 768);
+  final out = Uint8List(6144 + 6144);
+  // Spectrum display order: third | char-row | line | column ->
+  // linear MSX cell order idx*8+line.
+  for (var y = 0; y < 192; y++) {
+    for (var c = 0; c < 32; c++) {
+      final v =
+          bm[(y >> 6) * 2048 + ((y >> 3) & 7) * 256 + (y & 7) * 32 + c];
+      out[((y >> 3) * 32 + c) * 8 + (y & 7)] = v;
+    }
+  }
+  for (var i = 0; i < 768; i++) {
+    final a = at[i];
+    final fg = _zx2msxColour[(a & 7) | ((a >> 3) & 8)];
+    var bg = _zx2msxColour[(a >> 3) & 15];
+    var col = (fg << 4) | bg;
+    if (a & 0x80 != 0) col = (bg << 4) | fg; // FLASH: static swap
+    for (var j = 0; j < 8; j++) {
+      out[6144 + i * 8 + j] = col;
+    }
+  }
+  return out;
+}
+
+/// Encoder table for MSX targets. 1bpp formats (.rbt tilesets, .rbm
+/// tilemaps, .rbf fonts) are shared — the byte-per-row pattern layout
+/// is identical to what the VDP pattern/sprite tables take. Sprites
+/// repack to 16x16 octant patterns, screens to pattern+colour dumps,
+/// music/SFX convert to the ~1.79 MHz AY formats.
+const msxGfxEncoders = <String, GfxEncoder>{
+  '.rbs': encodeSpriteMsx,
+  '.rbt': encodeTileset,
+  '.rbm': encodeTilemap,
+  '.rbf': encodeFont,
+  '.rbc': encodeScreenMsx,
+  '.rnt': encodeRntMsx,
+  '.rsf': encodeRsfMsx,
+  '.ray': encodeRayMsx,
+};

@@ -7,10 +7,10 @@
 import 'dart:io';
 
 /// runtime dir -> runtimeModules key (TargetFamily name).
-const platforms = {'zx': 'zx', 'cpc': 'cpc', 'c64': 'cbm'};
+const platforms = {'zx': 'zx', 'cpc': 'cpc', 'c64': 'cbm', 'msx': 'msx'};
 
 /// Dirs whose modules are Z80 — runtime/shared/ merges into these.
-const z80Dirs = {'zx', 'cpc'};
+const z80Dirs = {'zx', 'cpc', 'msx'};
 
 void main() {
   var dir = Directory('../../runtime');

@@ -11,6 +11,7 @@ import 'codegen.dart';
 import 'compiler.dart';
 import 'ctap.dart';
 import 'dsk.dart';
+import 'msx.dart';
 import 'plus3loader.dart';
 import 'targets.dart';
 
@@ -163,6 +164,12 @@ const kPlus3PageableBanks = {0, 3, 4, 6}; // bank1 = +3DOS cache
 const kBankWindow = 0xC000;
 const kCpcBankWindow = 0x4000;
 const kBankSize = 0x4000;
+
+/// ASCII16 mapper: banked assets page into the #4000-#7FFF window.
+/// Bank 0 holds the cartridge bootstrap + code + resident assets, so
+/// only banks 1+ are available for `bank<N>` asset dirs.
+const kMsxBankWindow = 0x4000;
+const kMsxPageableBanks = {1, 2, 3, 4, 5, 6, 7};
 const kLoaderOrg = 0x6000;
 
 /// Scan `<projectDir>/assets` for known asset files and encode them via
@@ -206,12 +213,17 @@ AssetScan? scanAssets(String projectDir,
         final d = segs[ai + 1];
         if (d.startsWith('bank')) {
           bank = int.tryParse(d.substring(4));
-          if (bank == null || !pageableBanks.contains(bank)) {
+          if (bank == null ||
+              (!pageableBanks.contains(bank) && bank != 0)) {
             onError?.call('asset ${f.path}: "$d" is not a pageable bank '
                 'dir (want one of '
                 '${pageableBanks.map((b) => 'bank$b').join(', ')})');
             return null;
           }
+          // bank 0 is the resident bank wherever it exists (zx page 0,
+          // msx code bank) — on targets that can't page it, it degrades
+          // to a resident asset.
+          if (!pageableBanks.contains(bank)) bank = null;
         }
       }
       Uint8List bytes;
@@ -584,19 +596,27 @@ Future<({bool ok, String? artifact, int? target})> _buildOne(
       switch (platformOf(t ?? 48)) {
         TargetFamily.cpc => cpcGfxEncoders,
         TargetFamily.cbm => cbmGfxEncoders,
+        TargetFamily.msx => msxGfxEncoders,
         // zx: 48K beeper-encodes .ray; 128K/+3 AY-encodes .rnt so a
         // single song asset covers every ZX target
         _ => (t ?? 48) == 48 ? zx48GfxEncoders : zx128GfxEncoders,
       };
   // cbm scans like a 128 (bank<N> dirs are accepted) — on a bankless
   // cbm target they're streamed off the .d64 via COPYBANK, on zx48
-  // the !bankCapableOf check below warns and ignores them.
-  Set<int> banksFor(int? t) => t == 6128
-      ? kCpcPageableBanks
-      : t == 3
-          ? kPlus3PageableBanks
-          : kPageableBanks;
-  int windowFor(int? t) => t == 6128 ? kCpcBankWindow : kBankWindow;
+  // the !bankCapableOf check below warns and ignores them. msx has no
+  // pageable-bank model at all — bank<N> dirs are a hard error there.
+  Set<int> banksFor(int? t) => platformOf(t ?? 48) == TargetFamily.msx
+      ? kMsxPageableBanks
+      : t == 6128
+          ? kCpcPageableBanks
+          : t == 3
+              ? kPlus3PageableBanks
+              : kPageableBanks;
+  int windowFor(int? t) => platformOf(t ?? 48) == TargetFamily.msx
+      ? kMsxBankWindow
+      : t == 6128
+          ? kCpcBankWindow
+          : kBankWindow;
   var scan = scanAssets(projectDir, overlayKey: overlayKey,
       onError: log.add, encoders: encodersFor(tgt),
       pageableBanks: banksFor(tgt), bankWindow: windowFor(tgt));
@@ -640,9 +660,14 @@ Future<({bool ok, String? artifact, int? target})> _buildOne(
         bankedSize: scan.bankedSize);
     if (!result.ok) return (ok: false, artifact: null, target: null);
   }
-  final resolvedOrg = orgFor(resolvedTgt) ?? defaultOrgOf(resolvedTgt);
+  var resolvedOrg = orgFor(resolvedTgt) ?? defaultOrgOf(resolvedTgt);
   final cpc = platformOf(resolvedTgt) == TargetFamily.cpc;
   final cbm = platformOf(resolvedTgt) == TargetFamily.cbm;
+  final msx = platformOf(resolvedTgt) == TargetFamily.msx;
+  // ASCII16 spans #4000-#BFFF — a banked program can't run at the #8000
+  // default org (it's cartridge space), so it relocates to #C000. The
+  // .cas/.com get the same org; they carry no banked assets anyway.
+  if (msx && scan.bankBlobs.isNotEmpty) resolvedOrg = 0xC000;
   if (scan.bankBlobs.isNotEmpty && !bankCapableOf(resolvedTgt) && !cbm) {
     log.add('warning: assets under assets/bank<N>/ are ignored '
         '(banked memory requires zx128/zxplus3/cpc6128)');
@@ -852,6 +877,46 @@ Future<({bool ok, String? artifact, int? target})> _buildOne(
         '0x${resolvedOrg.toRadixString(16)})');
     log.add('built $tapPath');
     return (ok: true, artifact: prgPath, target: resolvedTgt);
+  }
+
+  // MSX1: assemble to a flat binary at the RAM org, then package.
+  // .cas is always emitted (any MSX1 with a tape drive / openMSX);
+  // .rom only when the payload fits a single 16K cart page after the
+  // RAM-copy preamble — same skip-if-too-big pattern as the cbm .crt.
+  if (msx) {
+    final binPath = '$outDir/game.bin';
+    final symPath = '$outDir/game.sym';
+    final br =
+        await runPasmo(asmPath, binPath, pasmo: pasmo, symPath: symPath);
+    if (br.out.isNotEmpty) log.add(br.out.trimRight());
+    if (br.err.isNotEmpty) log.add(br.err.trimRight());
+    if (br.code != 0) {
+      log.add('pasmo failed (${br.code}) — see $asmPath');
+      return (ok: false, artifact: null, target: null);
+    }
+    final code = File(binPath).readAsBytesSync();
+    final casPath = '$outDir/$name.cas';
+    File(casPath).writeAsBytesSync(
+        buildMsxCas(name: name, org: resolvedOrg, code: code));
+    log.add('built $casPath  (code ${code.length} bytes @ '
+        '0x${resolvedOrg.toRadixString(16)}; run with BLOAD"CAS:",R)');
+    final romPath = '$outDir/$name.rom';
+    final rom =
+        buildMsxRom(code, org: resolvedOrg, bankBlobs: scan.bankBlobs);
+    if (rom == null) {
+      log.add('skipped $romPath (code does not fit a 16K cartridge)');
+    } else {
+      File(romPath).writeAsBytesSync(rom);
+      final kb = rom.length >> 10;
+      log.add('built $romPath (${kb}K cartridge'
+          '${scan.bankBlobs.isEmpty ? '' : ' — ASCII16 mapper, ${scan.bankBlobs.length} asset bank(s); .cas/.com carry no banked assets'}'
+          ')');
+    }
+    final mapPath = '$outDir/map.txt';
+    File(mapPath).writeAsStringSync(
+        buildMapReport(name, resolvedOrg, code.length, scan));
+    log.add('wrote $mapPath');
+    return (ok: true, artifact: casPath, target: resolvedTgt);
   }
 
   // CPC: pasmo --cdtbas emits a CDT (BASIC loader + machine-code block

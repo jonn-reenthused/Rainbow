@@ -8,6 +8,7 @@ export 'src/build.dart';
 export 'src/ccrt.dart';
 export 'src/cd64.dart';
 export 'src/dsk.dart';
+export 'src/msx.dart';
 export 'src/lexer.dart' show Lexer, Token, TokKind;
 export 'src/sema.dart' show ProgramInfo, SubInfo;
 export 'src/targets.dart';

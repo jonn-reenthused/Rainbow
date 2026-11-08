@@ -1105,6 +1105,9 @@ rbt_key:
         ld      b,a
         ld      c,#fe
         in      a,(c)           ; A = row bits (0 = pressed)
+        or      #e0             ; bits 5-7 aren't keys — floating reads as
+                                ; pressed otherwise, and inkey would stop
+                                ; at the phantom before reaching real keys
         ; shift bit E into carry
         ld      b,e
         inc     b
@@ -1148,6 +1151,11 @@ _found  ld      hl,rbt_keymap
         ld      e,c
         add     hl,de
         ld      a,(hl)
+        or      a
+        ret     nz              ; mapped ASCII
+        inc     c               ; unmapped/phantom code — keep scanning
+        djnz    _scan
+        xor     a
         ret
 
 ; ----------------------------------------------------------------------------
@@ -1241,6 +1249,118 @@ _kempston:
         in      a,(c)
         and     #1f             ; already %000FUDLR
         ret
+
+; ----------------------------------------------------------------------------
+; rbt_input - line editor. HL = dest buffer, B = max length (array size-1).
+; Echoes via rbt_putchar; 8/127 delete, 13 ends and NUL-terminates.
+; No auto-repeat: each accepted char waits for key release.
+; ----------------------------------------------------------------------------
+rbt_input:
+        ld      (rbt_in_ptr),hl
+        ld      a,b
+        ld      (rbt_in_max),a
+        xor     a
+        ld      (rbt_in_len),a
+_iw     call    rbt_inkey       ; A = ascii or 0
+        or      a
+        jr      z,_iw           ; wait for a press
+        cp      13
+        jr      z,_idone
+        cp      8
+        jr      z,_ibs
+        cp      127
+        jr      z,_ibs
+        cp      32
+        jr      c,_irel         ; ignore other control codes
+        ld      d,a             ; keep the char
+        ld      a,(rbt_in_max)
+        ld      e,a
+        ld      a,(rbt_in_len)
+        cp      e
+        jr      nc,_irel        ; buffer full
+        ld      a,d
+        ld      hl,(rbt_in_ptr)
+        ld      (hl),a
+        inc     hl
+        ld      (rbt_in_ptr),hl
+        ld      a,(rbt_in_len)
+        inc     a
+        ld      (rbt_in_len),a
+        ld      a,d
+        call    rbt_putchar     ; echo (clobbers regs - all state is in vars)
+        jr      _irel
+_ibs    ld      a,(rbt_in_len)  ; backspace
+        or      a
+        jr      z,_irel
+        dec     a
+        ld      (rbt_in_len),a
+        ld      hl,(rbt_in_ptr)
+        dec     hl
+        ld      (rbt_in_ptr),hl
+        call    _ibsch          ; erase the last printed char
+        jr      _irel
+_irel   call    rbt_inkey       ; wait for release before next press
+        or      a
+        jr      nz,_irel
+        jr      _iw
+_idone  ld      hl,(rbt_in_ptr)
+        xor     a
+        ld      (hl),a          ; NUL terminate
+_idrel  call    rbt_inkey       ; a held ENTER must release before we
+        or      a               ; return, or the next INPUT sees it again
+        jr      nz,_idrel
+        ret
+
+; erase one char: cursor back (wrapping up a row at col 0), space, back again
+_ibsch  ld      a,(rbt_col)
+        or      a
+        jr      nz,_bl
+        ld      a,(rbt_row)
+        dec     a
+        ld      (rbt_row),a
+        ld      a,31
+        jr      _bc
+_bl     dec     a
+_bc     ld      (rbt_col),a
+        ld      a,' '
+        call    rbt_putchar     ; prints space, advances cursor
+        ld      a,(rbt_col)
+        or      a
+        jr      nz,_b2
+        ld      a,(rbt_row)
+        dec     a
+        ld      (rbt_row),a
+        ld      a,31
+        jr      _b3
+_b2     dec     a
+_b3     ld      (rbt_col),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_match - HL = NUL-terminated buffer, DE = length-prefixed literal
+;   (defb len,"text"). Out: A = 1 on exact match else 0.
+; ----------------------------------------------------------------------------
+rbt_match:
+        ld      a,(de)          ; literal length
+        inc     de
+        ld      b,a
+_ml     ld      a,(de)
+        cp      (hl)
+        jr      nz,_mno
+        inc     hl
+        inc     de
+        djnz    _ml
+        ld      a,(hl)          ; buffer must end here too
+        or      a
+        jr      nz,_mno
+        ld      a,1
+        ret
+_mno    xor     a
+        ret
+
+rbt_in_ptr      defw    0
+rbt_in_len      defb    0
+rbt_in_max      defb    0
 ''',
     'p3load': r'''
 ; ============================================================================
@@ -5803,6 +5923,118 @@ _fired  ld      c,a
         add     a,a
         or      c
         ret
+
+; ----------------------------------------------------------------------------
+; rbt_input - line editor. HL = dest buffer, B = max length (array size-1).
+; Echoes via rbt_putchar; 8/127 delete, 13 ends and NUL-terminates.
+; No auto-repeat: each accepted char waits for key release.
+; ----------------------------------------------------------------------------
+rbt_input:
+        ld      (rbt_in_ptr),hl
+        ld      a,b
+        ld      (rbt_in_max),a
+        xor     a
+        ld      (rbt_in_len),a
+_iw     call    rbt_inkey       ; A = ascii or 0
+        or      a
+        jr      z,_iw           ; wait for a press
+        cp      13
+        jr      z,_idone
+        cp      8
+        jr      z,_ibs
+        cp      127
+        jr      z,_ibs
+        cp      32
+        jr      c,_irel         ; ignore other control codes
+        ld      d,a             ; keep the char
+        ld      a,(rbt_in_max)
+        ld      e,a
+        ld      a,(rbt_in_len)
+        cp      e
+        jr      nc,_irel        ; buffer full
+        ld      a,d
+        ld      hl,(rbt_in_ptr)
+        ld      (hl),a
+        inc     hl
+        ld      (rbt_in_ptr),hl
+        ld      a,(rbt_in_len)
+        inc     a
+        ld      (rbt_in_len),a
+        ld      a,d
+        call    rbt_putchar     ; echo (clobbers regs - all state is in vars)
+        jr      _irel
+_ibs    ld      a,(rbt_in_len)  ; backspace
+        or      a
+        jr      z,_irel
+        dec     a
+        ld      (rbt_in_len),a
+        ld      hl,(rbt_in_ptr)
+        dec     hl
+        ld      (rbt_in_ptr),hl
+        call    _ibsch          ; erase the last printed char
+        jr      _irel
+_irel   call    rbt_inkey       ; wait for release before next press
+        or      a
+        jr      nz,_irel
+        jr      _iw
+_idone  ld      hl,(rbt_in_ptr)
+        xor     a
+        ld      (hl),a          ; NUL terminate
+_idrel  call    rbt_inkey       ; a held ENTER must release before we
+        or      a               ; return, or the next INPUT sees it again
+        jr      nz,_idrel
+        ret
+
+; erase one char: cursor back (wrapping up a row at col 0), space, back again
+_ibsch  ld      a,(rbt_col)
+        or      a
+        jr      nz,_bl
+        ld      a,(rbt_row)
+        dec     a
+        ld      (rbt_row),a
+        ld      a,31
+        jr      _bc
+_bl     dec     a
+_bc     ld      (rbt_col),a
+        ld      a,' '
+        call    rbt_putchar     ; prints space, advances cursor
+        ld      a,(rbt_col)
+        or      a
+        jr      nz,_b2
+        ld      a,(rbt_row)
+        dec     a
+        ld      (rbt_row),a
+        ld      a,31
+        jr      _b3
+_b2     dec     a
+_b3     ld      (rbt_col),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_match - HL = NUL-terminated buffer, DE = length-prefixed literal
+;   (defb len,"text"). Out: A = 1 on exact match else 0.
+; ----------------------------------------------------------------------------
+rbt_match:
+        ld      a,(de)          ; literal length
+        inc     de
+        ld      b,a
+_ml     ld      a,(de)
+        cp      (hl)
+        jr      nz,_mno
+        inc     hl
+        inc     de
+        djnz    _ml
+        ld      a,(hl)          ; buffer must end here too
+        or      a
+        jr      nz,_mno
+        ld      a,1
+        ret
+_mno    xor     a
+        ret
+
+rbt_in_ptr      defw    0
+rbt_in_len      defb    0
+rbt_in_max      defb    0
 ''',
     'pixel': r'''
 ; ============================================================================
@@ -9184,6 +9416,10 @@ rbt_key:
 @sel:   eor     #$ff            ; active-low column mask
         sei
         jsr     rbt_mapio
+        ldx     #$ff            ; port A all-output (columns can be driven)
+        stx     $dc02
+        ldx     #$00            ; port B all-input (rows readable)
+        stx     $dc03
         sta     $dc00
         lda     $dc01
         jsr     rbt_maprun
@@ -9205,19 +9441,50 @@ rbt_key:
 ; rbt_inkey - scan matrix, return ASCII of first pressed key (or 0)
 ; ----------------------------------------------------------------------------
 rbt_inkey:
-        lda     #0
-        sta     rbt_t1          ; code
-@scan:  lda     rbt_t1
-        jsr     rbt_key
-        bne     @found
-        inc     rbt_t1
-        lda     rbt_t1
-        cmp     #64
-        bcc     @scan
+        sei
+        jsr     rbt_mapio
+        lda     #$ff            ; port A output (column select)
+        sta     $dc02
+        lda     #$00            ; port B input (row read)
+        sta     $dc03
+        ldy     #0              ; col 0-7
+        lda     #$fe            ; ~(1<<col) mask, rotates left
+        sta     rbt_t0
+@col:   lda     rbt_t0
+        sta     $dc00           ; ground this column
+        lda     $dc01           ; row bits (0 = pressed)
+        cmp     #$ff
+        bne     @got            ; something held in this column
+        sec
+        rol     rbt_t0          ; next column mask
+        iny
+        cpy     #8
+        bcc     @col
+        lda     $dc00           ; restore idle column state
+        jsr     rbt_maprun
+        cli
         lda     #0
         rts
-@found: ldx     rbt_t1
-        lda     rbt_keymap,x
+@got:   sta     rbt_t1          ; column bits
+        lda     $dc00
+        jsr     rbt_maprun
+        cli
+        ; key index = col*8 + first clear bit
+        ldx     #0
+@bit:   lsr     rbt_t1
+        bcc     @map
+        inx
+        jmp     @bit
+@map:   tya                     ; col
+        asl     a
+        asl     a
+        asl     a               ; col*8
+        sta     rbt_t0
+        txa                     ; rowbit
+        clc
+        adc     rbt_t0          ; matrix index 0-63
+        tax
+        lda     rbt_cbmkeymap,x ; c64 matrix -> ASCII
         rts
 
 ; ----------------------------------------------------------------------------
@@ -9299,6 +9566,136 @@ rbt_keymap:
         .byte   'p','o','i','u','y',0,0,0     ; row 5
         .byte   13,'l','k','j','h',0,0,0      ; row 6
         .byte   ' ',0,'m','n','b',0,0,0       ; row 7
+
+; ----------------------------------------------------------------------------
+; rbt_input - line editor. rbt_hl = dest buffer, A = max length (size-1).
+; Echoes via rbt_putchar; 8/127/20 delete, 13 ends and NUL-terminates.
+; No auto-repeat: each accepted char waits for key release. All state is
+; kept in vars because rbt_inkey/rbt_putchar clobber registers.
+; ----------------------------------------------------------------------------
+rbt_input:
+        sta     rbt_in_max
+        lda     rbt_hl
+        sta     rbt_in_ptr
+        lda     rbt_hl+1
+        sta     rbt_in_ptr+1
+        lda     #0
+        sta     rbt_in_len
+@iw:    jsr     rbt_inkey       ; A = ascii or 0
+        beq     @iw             ; wait for a press
+        cmp     #13
+        beq     @idone
+        cmp     #8
+        beq     @ibs
+        cmp     #127
+        beq     @ibs
+        cmp     #20             ; c64 DEL
+        beq     @ibs
+        cmp     #32
+        bcc     @irel           ; ignore other control codes
+        ; append if len < maxlen
+        ldy     rbt_in_len
+        cpy     rbt_in_max
+        bcs     @irel           ; buffer full
+        ; copy the write ptr into zp rbt_hl for (zp),y addressing
+        ldx     rbt_in_ptr
+        stx     rbt_hl
+        ldx     rbt_in_ptr+1
+        stx     rbt_hl+1
+        ldy     #0
+        sta     (rbt_hl),y      ; A still holds the char
+        inc     rbt_in_ptr
+        bne     @nhi
+        inc     rbt_in_ptr+1
+@nhi:   inc     rbt_in_len
+        jsr     rbt_putchar     ; echo
+        jmp     @irel
+@ibs:   lda     rbt_in_len      ; backspace
+        beq     @irel
+        dec     rbt_in_len
+        lda     rbt_in_ptr
+        bne     @plo
+        dec     rbt_in_ptr+1
+@plo:   dec     rbt_in_ptr
+        jsr     _ibsch          ; erase the last printed char
+        jmp     @irel
+@irel:  jsr     rbt_inkey       ; wait for release before next press
+        bne     @irel
+        jmp     @iw
+@idone: lda     rbt_in_ptr
+        sta     rbt_hl
+        lda     rbt_in_ptr+1
+        sta     rbt_hl+1
+        ldy     #0
+        lda     #0
+        sta     (rbt_hl),y      ; NUL terminate
+@idrel: jsr     rbt_inkey       ; a held ENTER must release first, or the
+        bne     @idrel          ; next INPUT sees it again
+        rts
+
+; erase one char: cursor back (wrapping up a row at col 0), space, back again
+_ibsch:
+        lda     rbt_col
+        bne     @bl
+        dec     rbt_row         ; col 0: up a row to col 39
+        lda     #39
+        jmp     @bc
+@bl:    sec
+        sbc     #1
+@bc:    sta     rbt_col
+        lda     #' '
+        jsr     rbt_putchar     ; prints space, advances cursor
+        lda     rbt_col
+        bne     @b2
+        dec     rbt_row
+        lda     #39
+        jmp     @b3
+@b2:    sec
+        sbc     #1
+@b3:    sta     rbt_col
+        rts
+
+; ----------------------------------------------------------------------------
+; rbt_match - rbt_hl = NUL-terminated buffer, rbt_de = length-prefixed
+;   literal (.byte len,"text"). Out: A = 1 on exact match else 0.
+; ----------------------------------------------------------------------------
+rbt_match:
+        ldy     #0
+        lda     (rbt_de),y      ; literal length
+        tax                     ; X = bytes remaining
+        inc     rbt_de          ; DE -> first text byte
+        bne     @ml
+        inc     rbt_de+1
+@ml:    txa
+        beq     @mend
+        lda     (rbt_hl),y
+        cmp     (rbt_de),y
+        bne     @mno
+        iny
+        dex
+        jmp     @ml
+@mend:  lda     (rbt_hl),y      ; buffer must end here too
+        bne     @mno
+        lda     #1
+        rts
+@mno:   lda     #0
+        rts
+
+rbt_in_ptr:     .word   0
+rbt_in_len:     .byte   0
+rbt_in_max:     .byte   0
+
+; c64 matrix (col*8+rowbit) -> ASCII. Only real text keys mapped; shifts,
+; cursors, function keys and control keys return 0.
+rbt_cbmkeymap:
+        .byte   20,13,0,0,0,0,0,0          ; col 0: DEL RETURN _ F7 F1 F3 F5 _
+        .byte   '3','w','a','4','z','s','e',0  ; col 1: 3 W A 4 Z S E LSHIFT
+        .byte   '5','r','d','6','c','f','t','x'  ; col 2: 5 R D 6 C F T X
+        .byte   '7','y','g','8','b','h','u','v'  ; col 3: 7 Y G 8 B H U V
+        .byte   '9','i','j','0','m','k','o','n'  ; col 4: 9 I J 0 M K O N
+        .byte   '+','p','l','-','.',':','@',','  ; col 5: + P L - . : @ ,
+        .byte   0,'*',';',0,0,'=','^','/'        ; col 6: _ * ; HOME _ = ^ /
+        .byte   '1',0,0,'2',' ',0,'q',0          ; col 7: 1 <- CTRL 2 SPC C= Q STOP
 ''',
     'math': r'''
 ; ============================================================================
@@ -12435,6 +12832,3755 @@ rbt_tm_mapat:
         rts
 @oob:   lda     #0
         rts
+''',
+  },
+  'msx': {
+    'math': r'''
+; ============================================================================
+; rbt_math_asm - arithmetic helpers for 8/16-bit ops
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; rbt_mul8 - HL = D * E (unsigned, low 16 bits)
+; ----------------------------------------------------------------------------
+rbt_mul8:
+        ld      hl,0
+        ld      b,8
+_ml     add     hl,hl
+        sla     d
+        jr      nc,_m0
+        ld      a,l
+        add     a,e
+        ld      l,a
+        jr      nc,_m0
+        inc     h
+_m0     djnz    _ml
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_divmod8 - in: A = dividend, B = divisor. out: A = quotient, B = remainder
+; ----------------------------------------------------------------------------
+rbt_divmod8:
+        ld      c,a
+        xor     a
+        ld      e,a             ; quotient
+        ld      a,b
+        or      a
+        jr      z,_dz           ; divisor 0: return q=0, r=0
+        ld      a,c
+_dl     cp      b
+        jr      c,_done
+        sub     b
+        inc     e
+        jr      _dl
+_done   ld      b,a             ; remainder
+        ld      a,e             ; quotient
+_dz     ret                     ; (a==0 here on the _dz path)
+
+; ----------------------------------------------------------------------------
+; rbt_mul16 - HL = DE * HL (low 16 bits; works for signed too)
+; ----------------------------------------------------------------------------
+rbt_mul16:
+        ld      b,h
+        ld      c,l
+        ld      hl,0
+        ld      a,16
+_ml     add     hl,hl
+        sla     c
+        rl      b
+        jr      nc,_m0
+        add     hl,de
+_m0     dec     a
+        jr      nz,_ml
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_divmod16 - unsigned: BC / DE -> BC = quotient, HL = remainder
+; ----------------------------------------------------------------------------
+rbt_divmod16:
+        ld      hl,0            ; remainder
+        ld      a,d
+        or      e
+        jr      z,_dz           ; divisor 0: return q=0, r=0
+        ld      a,16
+_dl     sla     c               ; num <<= 1, bit15 -> CY
+        rl      b
+        rl      l               ; rem <<= 1 + CY
+        rl      h
+        sbc     hl,de
+        jr      nc,_q1
+        add     hl,de           ; restore (CY=0 -> quotient bit 0)
+        jr      _nxt
+_q1     inc     c               ; quotient bit 1
+_nxt    dec     a
+        jr      nz,_dl
+        ret
+_dz     ld      b,h             ; quotient BC=0, remainder HL=0
+        ld      c,l
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_sdivmod16 - signed: BC / DE -> BC = quotient, HL = remainder
+; quotient truncates toward zero; remainder takes dividend's sign.
+; ----------------------------------------------------------------------------
+rbt_sdivmod16:
+        xor     a
+        ld      (rbt_divsign),a ; bit0: result negative
+        bit     7,b
+        jr      z,_nnum
+        ; negate BC
+        ld      a,c
+        cpl
+        ld      c,a
+        ld      a,b
+        cpl
+        ld      b,a
+        inc     bc
+        ld      a,(rbt_divsign)
+        xor     1
+        ld      (rbt_divsign),a
+_nnum   bit     7,d
+        jr      z,_ndiv
+        ; negate DE
+        ld      a,e
+        cpl
+        ld      e,a
+        ld      a,d
+        cpl
+        ld      d,a
+        inc     de
+        ld      a,(rbt_divsign)
+        xor     1
+        ld      (rbt_divsign),a
+_ndiv   call    rbt_divmod16
+        ld      a,(rbt_divsign)
+        or      a
+        ret     z
+        ; negate quotient BC
+        ld      a,c
+        cpl
+        ld      c,a
+        ld      a,b
+        cpl
+        ld      b,a
+        inc     bc
+        ret
+
+rbt_divsign     defb 0
+
+; ----------------------------------------------------------------------------
+; rbt_neg16 - HL = -HL (two's complement)
+; ----------------------------------------------------------------------------
+rbt_neg16:
+        xor     a
+        sub     l
+        ld      l,a
+        sbc     a,a
+        sub     h
+        ld      h,a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_abs16 - HL = |HL|
+; ----------------------------------------------------------------------------
+rbt_abs16:
+        bit     7,h
+        ret     z
+        jr      rbt_neg16
+''',
+    'ay': r'''
+; ============================================================================
+; rbt_ay_asm - PSG music player (MSX1)
+;
+; Port of the ZX AY player. The PSG is an AY-3-8910: register select on
+; port #A0, data write on #A1. Song format is the shared .ray stream:
+; rows of dur + 14 register bytes (r13 = #ff means keep previous shape),
+; ended by dur 0 + loop-offset word (#ffff = stop).
+;
+; rbt_ay_start  - HL = song data, A = bank (#ff = resident, always on MSX)
+; rbt_ay_stop   - halt playback + silence
+; rbt_ay_silence- volumes 0, mixer off
+; rbt_ay_tick   - advance one frame (called from rbt_hook_frame)
+;
+; The bank re-page dance from the ZX player is kept — rbt_bank is a stub
+; when the bank module isn't linked, so it costs nothing.
+; ============================================================================
+
+rbt_ay_regport  equ #a0
+rbt_ay_dataport equ #a1
+
+; ----------------------------------------------------------------------------
+rbt_ay_start:
+        ld      (rbt_ay_base),hl
+        ld      (rbt_ay_pos),hl
+        ld      a,(rbt_cur_bank)        ; remember the song's bank
+        ld      (rbt_ay_bank),a
+        xor     a
+        ld      (rbt_ay_dur),a          ; force row load on next tick
+        inc     a
+        ld      (rbt_ay_on),a
+        ret
+
+; ----------------------------------------------------------------------------
+rbt_ay_stop:
+        xor     a
+        ld      (rbt_ay_on),a
+        ; fall through: silence the chip (vols 0, tone+noise off)
+rbt_ay_silence:
+        ld      e,7                     ; mixer: all off (#3f)
+        ld      a,e
+        out     (#a0),a
+        ld      a,#3f
+        out     (#a1),a
+        ld      e,8                     ; regs 8,9,10 = channel volumes -> 0
+_v      ld      a,e
+        out     (#a0),a
+        xor     a
+        out     (#a1),a
+        inc     e
+        ld      a,e
+        cp      11
+        jr      c,_v
+        ret
+
+; ----------------------------------------------------------------------------
+rbt_ay_tick:
+        ld      a,(rbt_ay_on)
+        or      a
+        ret     z
+        ; page in the song bank, restore the caller's on exit
+        ld      a,(rbt_cur_bank)
+        ex      af,af'
+        ld      a,(rbt_ay_bank)
+        call    rbt_bank
+        call    _work
+        ex      af,af'
+        jp      rbt_bank                ; restore previous bank (ret)
+_work:
+        ld      a,(rbt_ay_dur)
+        or      a
+        jr      z,_row
+        dec     a
+        ld      (rbt_ay_dur),a
+        ret     nz
+_row    ld      hl,(rbt_ay_pos)
+        ld      a,(hl)                  ; dur byte
+        or      a
+        jr      z,_end
+        ld      (rbt_ay_dur),a
+        inc     hl
+        ; write r0..r12 unconditionally, r13 unless #ff
+        ld      e,0
+        di                              ; BIOS ISR also writes the PSG
+_wr     ld      a,e
+        out     (#a0),a
+        ld      a,(hl)
+        out     (#a1),a
+        ld      d,a
+        ld      a,e
+        cp      7                       ; mixer reg -> keep a shadow for
+        jr      nz,_wrn                 ; the sfx player's merge logic
+        ld      a,d
+        ld      (rbt_ay_r7),a
+_wrn    inc     hl
+        inc     e
+        ld      a,e
+        cp      13
+        jr      c,_wr
+        ei
+        ld      a,(hl)                  ; r13 env shape: #ff = skip
+        inc     hl
+        cp      #ff
+        jr      z,_next
+        ld      d,a
+        ld      a,e
+        out     (#a0),a
+        ld      a,d
+        out     (#a1),a
+_next   ld      (rbt_ay_pos),hl
+        ret
+_end    inc     hl
+        ld      e,(hl)                  ; loop row offset (#ffff = stop)
+        inc     hl
+        ld      d,(hl)
+        ld      a,d
+        and     e
+        inc     a
+        jp      z,rbt_ay_stop           ; #ffff -> stop + silence
+        ld      hl,(rbt_ay_base)
+        add     hl,de
+        ld      (rbt_ay_pos),hl
+        ret
+
+; ----------------------------------------------------------------------------
+rbt_ay_base     dw 0                    ; song data base
+rbt_ay_pos      dw 0                    ; current row pointer
+rbt_ay_r7       db 0                    ; last mixer byte (sfx merge)
+rbt_ay_dur      db 0                    ; frames left on current row
+rbt_ay_on       db 0                    ; playback active flag
+rbt_ay_bank     db 0                    ; bank the song data lives in
+''',
+    'bank': r'''
+; ============================================================================
+; rbt_bank - ASCII16 megaROM paging. Bank 0 is resident at #4000-#7FFF
+; (bootstrap + code + resident assets); banked assets live in banks 1+
+; and page into that window by writing the bank number to the #6000
+; mapper register (a memory write, not a port out). The program runs
+; from RAM at #8000, so paging the window mid-execution never touches
+; running code.
+;
+; rbt_bank     - A = bank to page into the #4000 window; tracks rbt_cur_bank
+; rbt_copybank - A = bank, HL = src (#4000 window), DE = dst, BC = len:
+;                pages the bank in, LDIRs, restores the previous bank
+; rbt_pg_in/out - nestable page guard (same contract as the zx version)
+; ============================================================================
+
+rbt_bank:
+        push    bc
+        ld      (rbt_cur_bank),a
+        ld      (#6000),a       ; ASCII16 page-1 bank register
+        pop     bc
+        ret
+
+rbt_copybank:
+        ex      af,af'                  ; save requested bank
+        ld      a,(rbt_cur_bank)
+        ex      af,af'                  ; a = new bank, af' = previous
+        call    rbt_bank
+        ldir                            ; hl -> de, bc bytes
+        ex      af,af'
+        jp      rbt_bank                ; restore previous bank
+
+rbt_pg_in:
+        push    af
+        ld      a,(rbt_cur_bank)
+        ld      (hl),a          ; save previous bank
+        pop     af
+        inc     a
+        ret     z               ; #FF = resident: nothing to page
+        dec     a
+        jp      rbt_bank
+
+rbt_pg_out:
+        push    af
+        ld      a,(hl)
+        call    rbt_bank
+        pop     af
+        ret
+
+rbt_cur_bank    db 0
+''',
+    'charset': r'''
+; ============================================================================
+; rbt_charset_asm - text/attribute engine (MSX1 Screen 2 / MSX2 Screen 5)
+; Cursor-based PRINT. Cell (row,col) owns pattern (row*32+col) thanks to
+; core's identity name table — glyph rows land at pattern addr idx*8 and
+; the fg/bg colour row at colour addr #2000+idx*8.
+;
+; On RBT_MSX2 (rbt_smode=1) glyphs expand 1bpp -> fg/bg nibbles via
+; rbt_xpnib: cell (row,col) covers VRAM (row*8+j)*128 + col*4, and the
+; pattern byte also lands in rbt_shadow for POINT/FILLATTR.
+;
+; rbt_attr keeps the ZX FBPPPIII format; rbt_colbyte (core) converts it
+; to an MSX fg<<4|bg nibble pair (FLASH toggles the swap on a timer).
+; ============================================================================
+
+rbt_font        defw rbt_cartfont ; embedded Spectrum font — the BIOS
+                                  ; font lives in ROM and slot-paging it
+                                  ; in isn't portable; cartfont is always
+                                  ; emitted for msx builds (see compiler)
+rbt_fontbank    defb #ff          ; charset stmt writes this; MSX has no
+                                  ; banking so fonts are always resident
+
+; ----------------------------------------------------------------------------
+; rbt_locate - set cursor. In: B = column (0-31), C = row (0-23)
+; ----------------------------------------------------------------------------
+rbt_locate:
+        ld      a,b
+        and     31
+        ld      (rbt_col),a
+        ld      a,c
+        cp      24
+        jr      c,_ok
+        ld      a,23
+_ok     ld      (rbt_row),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_cell - cursor -> HL = pattern-table VRAM address of the char cell
+;   (idx = row*32+col; pattern addr = idx*8; colour addr = #2000+idx*8)
+; ----------------------------------------------------------------------------
+rbt_cell:
+        ld      a,(rbt_row)
+        ld      b,a
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; row*32
+        ld      a,(rbt_col)
+        and     31
+        or      l
+        ld      l,a             ; HL = idx
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; *8 -> pattern addr (colour: +#2000)
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_putchar - print char A at cursor, advance cursor.
+; Writes 8 glyph bytes + 8 colour bytes through the VDP.
+; ----------------------------------------------------------------------------
+rbt_putchar:
+        if      RBT_MSX2
+        push    af
+        ld      a,(rbt_smode)
+        or      a
+        jr      z,_sc2
+        pop     af
+        jp      rbt_putchar5
+_sc2    pop     af
+        endif
+        push    af
+        call    rbt_cell        ; HL = pattern addr for cell
+        ld      (rbt_cs_addr),hl
+        ex      de,hl           ; DE = pattern addr
+        pop     af
+        sub     32
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; (char-32)*8
+        ld      bc,(rbt_font)
+        add     hl,bc           ; HL = glyph
+        push    hl
+        push    de
+        pop     hl              ; HL = pattern addr (no ld hl,de on Z80)
+        call    rbt_vwaddr      ; VRAM write addr = pattern addr
+        pop     hl
+        ld      a,(rbt_over)
+        or      a
+        jr      nz,_inv
+        ld      b,8
+_cp     ld      a,(hl)
+        out     (#98),a         ; auto-incs through the glyph rows
+        inc     hl
+        djnz    _cp
+        jr      _col
+_inv    ld      b,8
+_cpi    ld      a,(hl)
+        cpl
+        out     (#98),a
+        inc     hl
+        djnz    _cpi
+_col    call    rbt_colbyte     ; A = fg<<4|bg
+        ld      c,a
+        ld      hl,(rbt_cs_addr)
+        ld      de,#2000
+        add     hl,de           ; colour-table addr for the cell
+        call    rbt_vwaddr
+        ld      b,8
+_cc     ld      a,c
+        out     (#98),a
+        djnz    _cc
+        ; advance cursor: col++, wrap -> row++ (mod 24)
+        ld      a,(rbt_col)
+        inc     a
+        and     31
+        ld      (rbt_col),a
+        ret     nz
+        ld      a,(rbt_row)
+        inc     a
+        cp      24
+        jr      c,_setrow
+        xor     a
+_setrow ld      (rbt_row),a
+        ret
+
+rbt_cs_addr     defw 0          ; cell pattern addr for the current putchar
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_putchar5 - Screen 5 putchar: glyph rows expand 1bpp -> fg/bg
+; nibbles (rbt_xpnib) into the bitmap; the pattern byte also lands in
+; rbt_shadow. Cell (row,col) covers VRAM row*1024 + col*4, stride 128.
+; ----------------------------------------------------------------------------
+rbt_putchar5:                   ; A = char
+        push    af
+        call    rbt_cell        ; HL = cell idx*8 = shadow offset
+        ld      de,rbt_shadow
+        add     hl,de
+        ld      (rbt_cs_shp),hl ; running shadow pointer
+        ld      a,(rbt_row)
+        add     a,a
+        add     a,a             ; row*4 -> hi byte of row*1024
+        ld      h,a
+        ld      a,(rbt_col)
+        add     a,a
+        add     a,a             ; col*4
+        ld      l,a
+        ld      (rbt_cs_va),hl  ; cell top-left VRAM addr
+        pop     af
+        sub     32
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; (char-32)*8
+        ld      bc,(rbt_font)
+        add     hl,bc           ; HL = glyph
+        ld      (rbt_cs_gl),hl
+        call    rbt_colbyte     ; A = fg<<4|bg
+        ld      (rbt_cs_cb),a
+        ld      b,8
+_row    push    bc
+        ld      hl,(rbt_cs_gl)  ; pattern byte -> E, glyph ptr++
+        ld      e,(hl)
+        inc     hl
+        ld      (rbt_cs_gl),hl
+        ld      a,(rbt_over)
+        or      a
+        jr      z,_ni
+        ld      a,e
+        cpl
+        ld      e,a
+_ni     ld      hl,(rbt_cs_shp) ; shadow store, ptr++
+        ld      (hl),e
+        inc     hl
+        ld      (rbt_cs_shp),hl
+        ld      hl,(rbt_cs_va)
+        call    rbt_vwaddr5     ; DE-preserved 17-bit vaddr
+        ld      a,(rbt_cs_cb)
+        ld      c,a             ; C = fg<<4|bg
+        ld      a,e             ; A = pattern
+        call    rbt_xpnib       ; 8 bits -> 4 bytes out #98
+        ld      hl,(rbt_cs_va)
+        ld      de,128
+        add     hl,de
+        ld      (rbt_cs_va),hl  ; next row
+        pop     bc
+        djnz    _row
+        ; advance cursor: col++, wrap -> row++ (mod 24)
+        ld      a,(rbt_col)
+        inc     a
+        and     31
+        ld      (rbt_col),a
+        ret     nz
+        ld      a,(rbt_row)
+        inc     a
+        cp      24
+        jr      c,_sr
+        xor     a
+_sr     ld      (rbt_row),a
+        ret
+
+rbt_cs_shp      defw 0          ; running shadow pointer (putchar5)
+rbt_cs_va       defw 0          ; current cell-row VRAM addr
+rbt_cs_gl       defw 0          ; running glyph pointer
+rbt_cs_cb       defb 0          ; colour byte for the current char
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_newline - move cursor to start of next row (wraps to 0 at bottom)
+; ----------------------------------------------------------------------------
+rbt_newline:
+        xor     a
+        ld      (rbt_col),a
+        ld      a,(rbt_row)
+        inc     a
+        cp      24
+        jr      c,_ok
+        xor     a
+_ok     ld      (rbt_row),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_print_str - print length-prefixed string at HL: defb len,"text"
+; ----------------------------------------------------------------------------
+rbt_print_str:
+        ld      b,(hl)
+        inc     hl
+        ld      a,b
+        or      a
+        ret     z
+_ps     ld      a,(hl)
+        push    hl
+        push    bc
+        call    rbt_putchar
+        pop     bc
+        pop     hl
+        inc     hl
+        djnz    _ps
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_print_u8 - print A as decimal (no leading zeros)
+; ----------------------------------------------------------------------------
+rbt_print_u8:
+        ld      l,a
+        ld      h,0
+        ; fall through
+; ----------------------------------------------------------------------------
+; rbt_print_u16 - print HL as decimal (no leading zeros). B = started flag.
+; ----------------------------------------------------------------------------
+rbt_print_u16:
+        exx
+        ld      b,0             ; B' = leading-zero flag (putchar clobbers BC)
+        exx
+        ld      de,-10000
+        call    _digit
+        ld      de,-1000
+        call    _digit
+        ld      de,-100
+        call    _digit
+        ld      de,-10
+        call    _digit
+        exx
+        ld      b,1             ; units digit always prints
+        exx
+        ld      de,-1
+        call    _digit
+        ret
+_digit                          ; A = count of |de| subtracted (0-9)
+        xor     a
+_dl     add     hl,de           ; de is negative; carry means HL >= |de|
+        jr      nc,_ovf         ; result went negative -> stop
+        inc     a
+        jr      _dl
+_ovf    or      a               ; clear carry
+        sbc     hl,de           ; undo the failed subtraction
+        or      a               ; is count zero?
+        jr      nz,_show
+        exx
+        ld      a,b
+        or      a
+        exx
+        ret     z               ; leading zero, suppress
+        xor     a               ; mid-number zero
+_show   exx
+        ld      b,1
+        exx
+        add     a,'0'
+        push    hl              ; putchar clobbers HL
+        call    rbt_putchar
+        pop     hl
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_ink / rbt_paper / rbt_bright / rbt_flash - modify rbt_attr. A = value.
+; ----------------------------------------------------------------------------
+rbt_ink:
+        and     7
+        ld      b,a
+        ld      a,(rbt_attr)
+        and     #f8
+        or      b
+        ld      (rbt_attr),a
+        ret
+
+rbt_paper:
+        and     7
+        add     a,a
+        add     a,a
+        add     a,a
+        ld      b,a
+        ld      a,(rbt_attr)
+        and     #c7
+        or      b
+        ld      (rbt_attr),a
+        ret
+
+rbt_bright:
+        and     1
+        rrca
+        rrca                    ; bit0 -> bit6
+        ld      b,a
+        ld      a,(rbt_attr)
+        and     #bf
+        or      b
+        ld      (rbt_attr),a
+        ret
+
+rbt_flash:
+        and     1
+        rrca                    ; bit0 -> bit7
+        ld      b,a
+        ld      a,(rbt_attr)
+        and     #7f
+        or      b
+        ld      (rbt_attr),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_fillattr - recolour a cell rectangle with the current attr.
+; In: B = x, C = y, D = w, E = h. MSX colour is per-pattern-row, so each
+; cell gets its colour byte written to all 8 rows.
+; ----------------------------------------------------------------------------
+rbt_fillattr:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_fillattr5
+        endif
+        ld      a,e
+        or      a
+        ret     z
+        call    rbt_colbyte     ; A = fg<<4|bg for current attr
+        ld      (rbt_fa_col),a
+_row    push    bc
+        push    de
+        ; cell idx = y*32 + x -> colour addr #2000 + idx*8
+        ld      a,c
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; y*32
+        ld      a,b
+        or      l
+        ld      l,a
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; *8
+        ld      de,#2000
+        add     hl,de
+        call    rbt_vwaddr
+        pop     de
+        push    de
+        ; write D cells x 8 colour bytes
+        ld      a,(rbt_fa_col)
+        sla     d
+        sla     d
+        sla     d               ; D*8 bytes — cells are contiguous in VRAM
+        ld      b,d
+_fc     out     (#98),a
+        djnz    _fc
+        pop     de
+        pop     bc
+        inc     c
+        dec     e
+        jr      nz,_row
+        ret
+
+rbt_fa_col      defb 0
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_fillattr5 - Screen 5 recolour: repaint each cell from the shadow
+; pattern plane with the current fg/bg pair — exact ZX attr semantics
+; (pixels unchanged, colours swapped). In: B = x, C = y, D = w, E = h.
+; ----------------------------------------------------------------------------
+rbt_fillattr5:
+        ld      a,e
+        or      a
+        ret     z
+        ld      a,b
+        ld      (rbt_fa_x),a
+        ld      a,c
+        ld      (rbt_fa_y),a
+        ld      a,d
+        ld      (rbt_fa_w),a
+        ld      a,e
+        ld      (rbt_fa_h),a
+        call    rbt_colbyte     ; A = fg<<4|bg for current attr
+        ld      (rbt_fa_col),a
+_y      ; vram row base = y*1024; shadow row base = rbt_shadow + y*256
+        ld      a,(rbt_fa_y)
+        add     a,a
+        add     a,a             ; y*4 -> hi byte of y*1024
+        ld      h,a
+        ld      l,0
+        ld      (rbt_fa_va),hl
+        ld      a,(rbt_fa_x)
+        ld      (rbt_fa_cx),a   ; current column
+        ld      a,(rbt_fa_w)
+        ld      (rbt_fa_i),a    ; columns left
+_x      ; cell shadow base = rbt_shadow + (y*32 + cx)*8
+        ld      a,(rbt_fa_y)
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; y*32
+        ld      a,(rbt_fa_cx)
+        or      l
+        ld      l,a             ; cellidx
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; *8
+        ld      de,rbt_shadow
+        add     hl,de
+        ld      (rbt_fa_sh),hl
+        ; cell vram addr = y*1024 + cx*4
+        ld      a,(rbt_fa_cx)
+        add     a,a
+        add     a,a
+        ld      e,a
+        ld      d,0
+        ld      hl,(rbt_fa_va)
+        add     hl,de
+        ld      (rbt_fa_cva),hl
+        ld      b,8             ; 8 rows
+_r      push    bc
+        ld      hl,(rbt_fa_sh)  ; pattern byte -> shadow ptr++
+        ld      a,(hl)
+        inc     hl
+        ld      (rbt_fa_sh),hl
+        push    af
+        ld      hl,(rbt_fa_cva)
+        call    rbt_vwaddr5
+        pop     af              ; A = pattern
+        push    af
+        ld      a,(rbt_fa_col)
+        ld      c,a             ; C = fg<<4|bg
+        pop     af              ; A = pattern
+        call    rbt_xpnib       ; recoloured 8 bits -> 4 bytes
+        ld      hl,(rbt_fa_cva)
+        ld      de,128
+        add     hl,de
+        ld      (rbt_fa_cva),hl
+        pop     bc
+        djnz    _r
+        ld      a,(rbt_fa_cx)
+        inc     a
+        ld      (rbt_fa_cx),a
+        ld      a,(rbt_fa_i)
+        dec     a
+        ld      (rbt_fa_i),a
+        jp      nz,_x
+        ld      a,(rbt_fa_y)
+        inc     a
+        ld      (rbt_fa_y),a
+        ld      a,(rbt_fa_h)
+        dec     a
+        ld      (rbt_fa_h),a
+        jp      nz,_y
+        ret
+
+rbt_fa_x        defb 0
+rbt_fa_y        defb 0
+rbt_fa_w        defb 0
+rbt_fa_h        defb 0
+rbt_fa_i        defb 0
+rbt_fa_cx       defb 0
+rbt_fa_va       defw 0
+rbt_fa_sh       defw 0
+rbt_fa_cva      defw 0
+        endif
+''',
+    'core': r'''
+; ============================================================================
+; rbt_core_asm - Rainbow runtime core (MSX1 TMS9918 Screen 2 / MSX2 Screen 5)
+; Entry point, VDP init + VRAM helpers, frame sync, pause, border, cls, RNG.
+;
+; Firmware-free: BIOS stays mapped in page 0 and services IM1 (#0038), so
+; vsync/waitkey are plain ei+halt like the ZX core — the BIOS ISR consumes
+; the VDP F flag, so we never poll it ourselves.
+;
+; On RBT_MSX2 builds MODE 1 selects Screen 5 (V9938 Graphic 4, 4bpp bitmap):
+; every screen write then takes the *_5 paths, keyed off rbt_smode. The
+; 1bpp pattern plane lives in rbt_shadow (the colour-matrix equivalent the
+; bitmap modes lack) so POINT/FILLATTR keep exact ZX semantics.
+;
+; Screen 2 VRAM map (R0=#02 selects Graphic 2):
+;   #0000-#17FF  pattern generator table  (768 patterns x8, 3 banks of 256)
+;   #1800-#1AFF  name table               (32x24 cells -> pattern index)
+;   #1B00-#1B7F  sprite attribute table   (32 entries x4)
+;   #2000-#37FF  colour table             (8 colour bytes per pattern: fg<<4|bg)
+;   #3800-#3FFF  sprite pattern table     (64 patterns x32, 16x16)
+;
+; The name table is initialised to identity (entry i = i mod 256), so the
+; cell at row R, col C owns pattern R*32+C — a linear bitmap-like layout.
+;
+; Screen 5 VRAM map (MODE 1, RBT_MSX2 only — G4, M3+M4):
+;   #0000-#69FF  bitmap                   (256x212, 2 pixels/byte)
+;   #7400-#75FF  sprite colour table      (32 entries x16, one byte/line)
+;   #7600-#767F  sprite attribute table   (32 entries x4)
+;   #7800-#7FFF  sprite pattern table     (64 patterns x32)
+; ============================================================================
+
+RBT_STACK       equ #f380       ; below the BIOS work area (#f380+)
+
+; ----------------------------------------------------------------------------
+; rbt_start - entry: set stack + IM1, init VDP, run MAIN:
+; ----------------------------------------------------------------------------
+rbt_start:
+        di
+        ld      sp,RBT_STACK
+        call    rbt_vdp_init
+        call    rbt_cls
+        im      1
+        ei
+        call    rb_main         ; user program entry (MAIN:)
+rbt_end:
+        call    rbt_sfx_drain
+        halt
+        call    rbt_hook_frame
+        jr      rbt_end         ; program end: idle forever
+
+; ----------------------------------------------------------------------------
+; VDP port helpers. Port #98 = data, #99 = control (write: addr lo, addr
+; hi|#40 selects write mode; reads return the status register).
+; ----------------------------------------------------------------------------
+; The #99 sequences are two-byte pairs — a status read between them
+; resets the VDP's value latch and the second byte lands as a first.
+; The BIOS ISR reads S0 every frame, so each pair brackets itself with
+; di/ei (the ei sits inside its own enable delay, keeping ints off for
+; the last out and back on for the next instruction).
+rbt_vwaddr:                     ; HL = VRAM address to write
+        di
+        ld      a,l
+        out     (#99),a
+        ld      a,h
+        and     #3f             ; A8-A13 only — A14+ lives in R#14 on
+        or      #40             ; the V9938 (bit7 would mean register
+        ei
+        out     (#99),a         ; write, not address high bits)
+        ret
+
+rbt_vraddr:                     ; HL = VRAM address to read
+        di
+        ld      a,l
+        out     (#99),a
+        ld      a,h
+        and     #3f
+        ei
+        out     (#99),a
+        ret
+
+rbt_vwrite:                     ; HL = VRAM dest, DE = source, BC = length
+        call    rbt_vwaddr
+        ex      de,hl           ; HL = source (DE = old dest, dead)
+_vwl    ld      a,(hl)
+        out     (#98),a
+        inc     hl
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,_vwl
+        ret
+
+rbt_vfill:                      ; A = fill byte, HL = VRAM dest, BC = count
+        ld      d,a
+        call    rbt_vwaddr
+_vf     ld      a,d
+        out     (#98),a
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,_vf
+        ret
+
+rbt_vreg:                       ; A = value, E = register number
+        di
+        out     (#99),a
+        ld      a,e
+        or      #80
+        ei
+        out     (#99),a
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; 17-bit variants for Screen 5: VRAM addresses A14-A16 come from R#14, so
+; these program it first (all SC5 tables live below #8000 -> R14 is 0/1).
+; ----------------------------------------------------------------------------
+rbt_vwaddr5:                    ; HL = VRAM address to write (17-bit)
+        ld      a,h
+        rlca
+        rlca
+        and     3               ; A14-A15
+        push    de              ; vreg takes E = register number —
+        ld      e,14            ; preserve DE for the caller
+        call    rbt_vreg
+        pop     de
+        jp      rbt_vwaddr
+
+rbt_vraddr5:                    ; HL = VRAM address to read (17-bit)
+        ld      a,h
+        rlca
+        rlca
+        and     3
+        push    de
+        ld      e,14
+        call    rbt_vreg
+        pop     de
+        jp      rbt_vraddr
+
+rbt_vfill5:                     ; A = fill byte, HL = 17-bit dest, BC = count
+        ld      d,a
+        call    rbt_vwaddr5
+_vf     ld      a,d
+        out     (#98),a
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,_vf
+        ret
+
+rbt_vwrite5:                    ; HL = 17-bit dest, DE = source, BC = length
+        call    rbt_vwaddr5
+        ex      de,hl           ; HL = source (DE = old dest, dead)
+_vwl    ld      a,(hl)
+        out     (#98),a
+        inc     hl
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,_vwl
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_vdp_init - Screen 2 registers + identity name table + hidden sprites
+; ----------------------------------------------------------------------------
+rbt_vdp_init:
+        ld      hl,rbt_vdpinit
+        ld      e,0             ; register counter
+_vr     ld      a,(hl)
+        inc     hl
+        call    rbt_vreg        ; di/ei-guarded two-byte register write
+        inc     e
+        ld      a,e
+        cp      8
+        jr      c,_vr
+        ; name table #1800-#1AFF: identity so cell (r,c) -> pattern r*32+c
+        ld      hl,#1800
+        call    rbt_vwaddr
+        ld      a,0
+        ld      bc,#300         ; 768 entries
+_nm     out     (#98),a
+        inc     a               ; value wraps mod 256 per third — that's
+                                ; exactly the in-third pattern index
+        dec     bc
+        push    af
+        ld      a,b
+        or      c
+        jr      z,_nmdone
+        pop     af
+        jr      _nm
+_nmdone pop     af
+        ; sprite attribute table #1B00-#1B7F: y=#d1 hides every sprite
+        ld      a,#d1
+        ld      hl,#1b00
+        ld      bc,128
+        call    rbt_vfill
+        ret
+
+rbt_vdpinit:
+        defb    #02             ; R0: Graphic 2 (screen 2)
+        defb    #e2             ; R1: 16K VRAM, display on, INT on, 16x16 spr
+        defb    #06             ; R2: name table #1800
+        defb    #ff             ; R3: colour table #2000 — G2 quirk: low
+                                ; bits are a size mask, not address; #ff
+                                ; selects the full 6K (unmirrored) table
+        defb    #03             ; R4: pattern table #0000 (same quirk)
+        defb    #36             ; R5: sprite attr table #1B00
+        defb    #07             ; R6: sprite pattern table #3800
+        defb    #f1             ; R7: text col #f, border 1 (black)
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_vdp5_init - Screen 5 (V9938 Graphic 4): 256x212 4bpp bitmap at
+; #0000-#69FF (LN=1 gives the real 212-line frame; Rainbow's coordinate
+; model still draws in the top 192 rows), sprite mode 2 tables at
+; #7400+ (SAT #7600), palette = MSX2 default so the rbt_zx2msx indices
+; stay valid.
+; ----------------------------------------------------------------------------
+rbt_vdp5_init:
+        ld      hl,rbt_vdp5regs
+        ld      e,0
+_vr     ld      a,(hl)
+        inc     hl
+        call    rbt_vreg        ; di/ei-guarded two-byte register write
+        inc     e
+        ld      a,e
+        cp      8
+        jr      c,_vr
+        ; R8/R18 untouched — VRAM config and display adjust are machine
+        ; BIOS settings, not mode state. R9 comes from the BIOS mirror
+        ; with only LN set: keeps the machine's PAL/NTSC bit and
+        ; interlace flags while pinning the display at 212 lines.
+        ld      a,(#ffe8)       ; RG9SAV (R8-R23 BIOS mirrors: #ffe7+)
+        or      #80             ; LN=1 -> 212-line display
+        ld      e,9
+        call    rbt_vreg
+        xor     a
+        ld      e,23
+        call    rbt_vreg        ; R23: vertical scroll 0
+        xor     a
+        ld      e,26
+        call    rbt_vreg        ; R26/R27: horizontal scroll 0 (stale
+        xor     a               ; values from a previous mode/program
+        ld      e,27            ; would shift the bitmap window)
+        call    rbt_vreg
+        ; palette: R#16 = index 0, then 16 x (0RRR0BBB, 00000GGG)
+        xor     a
+        ld      e,16
+        call    rbt_vreg
+        ld      bc,#209a        ; 32 bytes -> port #9A
+        ld      hl,rbt_pal
+_pal    outi
+        jr      nz,_pal
+        ; sprite tables: SCT clear, SAT hide (mode 2 terminator = 216)
+        xor     a
+        ld      hl,#7400
+        ld      bc,512
+        call    rbt_vfill5
+        ld      a,216
+        ld      hl,#7600
+        ld      bc,128
+        jp      rbt_vfill5
+
+rbt_vdp5regs:
+        defb    #06             ; R0: M3+M4 = Graphic 4 (screen 5)
+        defb    #62             ; R1: display on, INT on, 16x16 sprites
+        defb    #1f             ; R2: display base page 0 — bitmap modes
+                                ; reuse the name-table reg; its unused
+                                ; low bits are an address mask and must
+                                ; be 1 (same quirk as SC2's R3=#ff)
+        defb    #00             ; R3: unused
+        defb    #00             ; R4: unused
+        defb    #ec             ; R5: sprite attr table #7600 (R11=0)
+        defb    #0f             ; R6: sprite pattern table #7800
+        defb    #f1             ; R7: border colour (low nibble)
+
+; MSX2 default palette — the same colours the TMS9918's fixed set uses,
+; so rbt_zx2msx indices mean the same thing on both modes. Each entry
+; is 0RRR0BBB then 00000GGG.
+rbt_pal:
+        defb    #00,#00,#00,#00,#11,#06,#33,#07
+        defb    #17,#01,#27,#03,#51,#01,#27,#06
+        defb    #71,#01,#73,#03,#61,#06,#63,#06
+        defb    #11,#04,#55,#02,#55,#05,#77,#07
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_vsync - wait for the next frame interrupt (BIOS ISR services it).
+; Bumps rbt_framectr (RANDOMIZE's seed source — MSX has no ROM sysvar).
+; ----------------------------------------------------------------------------
+rbt_vsync:
+        call    rbt_sfx_drain   ; play any queued effect during the idle gap
+        ld      hl,(rbt_framectr)
+        inc     hl
+        ld      (rbt_framectr),hl
+        in      a,(#99)         ; read VDP S0 — clears any pending INT, or a
+                                ; mid-frame interrupt would return instantly
+        halt
+        call    rbt_hook_frame
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_pause - pause for B frames (B=0 waits for a keypress)
+; ----------------------------------------------------------------------------
+rbt_pause:
+        call    rbt_sfx_drain
+        ld      a,b
+        or      a
+        jr      z,rbt_waitkey
+_ploop  in      a,(#99)         ; clear pending INT before the wait
+        halt
+        call    rbt_hook_frame
+        djnz    _ploop
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_kbd_any - PPI matrix quick scan. Out: A = #ff when nothing is held,
+; the row's column byte (some bit clear) when a key is down. The #ff-for-
+; none convention matches the column reads — rbt_waitkey and rbt_anykey
+; both test against it.
+; ----------------------------------------------------------------------------
+rbt_kbd_any:
+        di                      ; BIOS ISR also scans the PPI — keep the
+                                ; row select ours for the whole sweep
+        in      a,(#aa)
+        and     #f0
+        ld      d,a             ; D = port C upper bits (CAPS/cassette)
+        ld      b,11            ; matrix rows 0-10
+        ld      e,0
+_rl     ld      a,d
+        or      e
+        out     (#aa),a         ; select row on port C low nibble
+        in      a,(#a9)         ; columns on port B
+        cp      #ff
+        jr      nz,_hit
+        inc     e
+        djnz    _rl
+        ei
+        ret                     ; A = #ff: nothing held
+_hit    ei
+        ret                     ; A = column bits (nonzero)
+
+; ----------------------------------------------------------------------------
+; rbt_waitkey - block until any key is pressed (50/60Hz polling so the AY
+; music hook keeps ticking while waiting)
+; ----------------------------------------------------------------------------
+rbt_waitkey:
+        call    rbt_sfx_drain
+_wk     halt
+        call    rbt_hook_frame
+        call    rbt_kbd_any
+        cp      #ff
+        jr      z,_wk
+_rel    call    rbt_kbd_any     ; wait for release
+        cp      #ff
+        jr      nz,_rel
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_border - set border to A (ZX colour 0-7, mapped to the MSX palette).
+; VDP register 7: high nibble = text colours (unused in screen 2), low
+; nibble = backdrop/border. Shadow byte keeps the high nibble stable.
+; ----------------------------------------------------------------------------
+rbt_border:
+        and     7
+        ld      e,a
+        ld      d,0
+        ld      hl,rbt_zx2msx
+        add     hl,de
+        ld      a,(hl)          ; MSX colour nibble
+        ld      e,a
+        ld      a,(rbt_vdp7)
+        and     #f0
+        or      e
+        ld      (rbt_vdp7),a
+        ld      e,7
+        jp      rbt_vreg
+
+; ----------------------------------------------------------------------------
+; rbt_scrmode - select screen mode (A = logical mode: 0 = Screen 2,
+; 1 = Screen 5). A real switch on MSX2 — the new mode's engine is then
+; reinitialised, the screen cleared, and rbt_hook_mode lets the sprite
+; module re-upload its tables. No-op on MSX1.
+; ----------------------------------------------------------------------------
+rbt_scrmode:
+        if      RBT_MSX2
+        and     1
+        ld      hl,rbt_smode
+        cp      (hl)
+        ret     z               ; already in that mode
+        ld      (hl),a
+        or      a
+        jr      nz,_m5
+        call    rbt_vdp_init    ; mode 0: back to Screen 2
+        jr      _sw
+_m5     call    rbt_vdp5_init   ; mode 1: Screen 5
+_sw     call    rbt_cls
+        jp      rbt_hook_mode
+        else
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_colbyte - rbt_attr (ZX FBPPPIII) -> A = MSX colour byte (fg<<4|bg).
+; FLASH swaps the nibbles while rbt_framectr bit5 is set (no hardware
+; flash on MSX — toggling fg/bg every 32 frames is the same trick).
+; ----------------------------------------------------------------------------
+rbt_zx2msx:
+        defb    1,4,6,13,12,7,10,14     ; ink: black blue red mag grn cyn yel gry
+        defb    1,5,9,13,3,7,11,15      ; bright: ltblue ltred ltgrn ltyel wht
+
+rbt_colbyte:
+        ld      a,(rbt_attr)
+        ld      e,a
+        and     7               ; ink 0-2
+        ld      c,a
+        ld      a,e
+        and     #40             ; bright bit6 -> index bit3
+        rrca
+        rrca
+        rrca
+        or      c
+        ld      hl,rbt_zx2msx
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)          ; fg nibble
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a
+        ld      c,a             ; fg<<4
+        ld      a,(rbt_attr)
+        rrca
+        rrca
+        rrca
+        and     #0f             ; paper bits3-5 | bright->bit3
+        ld      hl,rbt_zx2msx
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        or      c               ; A = fg<<4 | bg
+        ld      e,a
+        ld      a,(rbt_attr)
+        and     #80
+        jr      z,_nf
+        ld      a,(rbt_framectr)
+        and     #20             ; ~1.5 Hz nibble swap while FLASH set
+        jr      z,_nf
+        ld      a,e
+        rrca
+        rrca
+        rrca
+        rrca
+        ld      e,a
+_nf     ld      a,e
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_cls - clear the pattern table and re-fill the colour table with the
+; current attribute colour, home the cursor. (Name table stays identity.)
+; ----------------------------------------------------------------------------
+rbt_cls:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jr      nz,rbt_cls5
+        endif
+        xor     a
+        ld      hl,#0000
+        ld      bc,#1800        ; 6144 pattern bytes
+        call    rbt_vfill
+        call    rbt_colbyte
+        ld      hl,#2000
+        ld      bc,#1800        ; 6144 colour bytes
+        call    rbt_vfill
+        xor     a
+        ld      (rbt_col),a
+        ld      (rbt_row),a
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_cls5 - Screen 5 cls: fill the bitmap with solid paper (bg nibble in
+; both pixels) and clear the shadow pattern plane.
+; ----------------------------------------------------------------------------
+rbt_cls5:
+        call    rbt_colbyte     ; A = fg<<4|bg
+        and     #0f             ; bg nibble
+        ld      b,a
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a
+        or      b               ; A = bg<<4|bg (solid paper)
+        ld      hl,#0000
+        ld      bc,#6a00        ; 212 rows x 128 bytes
+        call    rbt_vfill5
+        ld      hl,rbt_shadow   ; clear the 1bpp shadow plane
+        ld      (hl),0
+        ld      de,rbt_shadow+1
+        ld      bc,6143
+        ldir
+        xor     a
+        ld      (rbt_col),a
+        ld      (rbt_row),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_xpnib - expand one 1bpp pattern byte into four SC5 VRAM bytes.
+; In: A = pattern byte, C = fg<<4|bg colour. Bit set -> fg nibble, bit
+; clear -> bg nibble; left pixel is the high nibble. Writes to port #98
+; (destination pre-addressed). Clobbers A,B,C,D,H.
+; ----------------------------------------------------------------------------
+rbt_xpnib:
+        ld      d,a             ; D = pattern
+        ld      h,c             ; H = fg<<4|bg
+        ld      b,4             ; four output bytes
+_xp     sla     d               ; left pixel of the pair
+        ld      a,h
+        jr      c,_f0
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a             ; bg<<4
+        and     #f0
+        jr      _n0
+_f0     and     #f0             ; fg<<4
+_n0     ld      c,a
+        sla     d               ; right pixel
+        ld      a,h
+        jr      c,_f1
+        and     #0f             ; bg already sits in the low nibble
+        jr      _n1
+_f1     rrca
+        rrca
+        rrca
+        rrca                    ; fg<<4|bg -> fg into the low nibble
+        and     #0f
+_n1     or      c
+        out     (#98),a
+        djnz    _xp
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_rnd8 - 8-bit Galois LFSR. Out: A = pseudo-random byte
+; ----------------------------------------------------------------------------
+rbt_rnd8:
+        ld      a,(rbt_seed)
+        add     a,a
+        jr      nc,_no_xor
+        xor     #1d
+_no_xor ld      (rbt_seed),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_mod8 - A = A mod B (unsigned). Clobbers C,E.
+; ----------------------------------------------------------------------------
+; ----------------------------------------------------------------------------
+; rbt_psg - write PSG register: E = reg, D = data. Preserves all regs.
+; ----------------------------------------------------------------------------
+rbt_psg:
+        push    af
+        di                      ; BIOS ISR also touches the PSG
+        ld      a,e
+        out     (#a0),a
+        ld      a,d
+        out     (#a1),a
+        ei
+        pop     af
+        ret
+
+rbt_mod8:
+        ld      c,a
+        xor     a
+        ld      e,a             ; E = quotient
+        ld      a,c
+_dl     cp      b
+        jr      c,_done
+        sub     b
+        inc     e
+        jr      _dl
+_done   ret                     ; A = remainder
+
+; ----------------------------------------------------------------------------
+; data
+; ----------------------------------------------------------------------------
+rbt_seed        defw #ace1
+rbt_framectr    defw 0          ; frame counter, bumped each rbt_vsync
+rbt_dataptr     defw 0          ; READ pointer (set to rbd_data by compiler)
+rbt_col         defb 0          ; PRINT cursor column (charset)
+rbt_row         defb 0          ; PRINT cursor row (charset)
+rbt_over        defb 0          ; 0 = normal, 1 = invert (OVER)
+rbt_attr        defb #38        ; current attr: ink|paper<<3|bright<<6|flash<<7
+rbt_vdp7        defb #f1        ; VDP reg7 shadow (border/text colours)
+        if      RBT_MSX2
+rbt_smode       defb 0          ; screen mode: 0 = Screen 2, 1 = Screen 5
+; 1bpp shadow of the SC5 pattern plane (cell idx*8 + line, like Screen
+; 2's pattern table layout). Every SC5 draw writes it alongside VRAM;
+; POINT tests bits here and FILLATTR repaints from it — the attr-cell
+; semantics bitmap modes can't offer in hardware.
+rbt_shadow      defs 6144
+        endif
+''',
+    'input': r'''
+; ============================================================================
+; rbt_input_asm - keyboard matrix + joystick input (MSX1)
+;
+; The keyboard is an 11x8 matrix scanned through the 8255 PPI: select a
+; row on port #AA bits 0-3 (upper nibble = CAPS/cassette, preserved),
+; read column bits on port #A9 (0 = pressed). Codes use
+; the ZX encoding (code = row*8 + bit) so KEY(n) stays source-portable —
+; rbt_zx2msxkey translates ZX positions to MSX matrix positions.
+;
+; Matrix (international layout; bit0 first within each row byte):
+;   R0 '0'-'7'   R1 '8' '9' '-' '=' '\' '[' ']' ';'
+;   R2 ` ~ , . / (dead) A B
+;   R3 'C'-'J'   R4 'K'-'R'   R5 'S'-'Z'
+;   R6 SHIFT CTRL GRAPH CAPS KANA F1 F2 F3
+;   R7 F4 F5 ESC TAB STOP BS SELECT RETURN
+;   R8 SPACE HOME INS DEL LEFT UP DOWN RIGHT
+;   R9-10 numeric pad
+;
+; Joystick: PSG registers 14/15 (ports #A0 sel / #A1 write / #A2 read).
+; R15 bit6 = port select (0 = joystick 1). R14: bits 0-3 dir, 4 trigA,
+; 5 trigB, 0 = pressed. Fire = trigA|trigB -> result bit4.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; rbt_kbd_scan - read one matrix row.
+;   In:  A = row (0-10)
+;   Out: A = column bits (0 = pressed)
+;   DI/EI bracket the PPI transaction so the BIOS ISR can't retarget the
+;   row select mid-read.
+; ----------------------------------------------------------------------------
+rbt_kbd_scan:
+        di
+        ld      e,a             ; row number
+        in      a,(#aa)
+        and     #f0             ; keep CAPS LED / cassette bits
+        or      e
+        out     (#aa),a         ; select row on PPI port C low nibble
+        in      a,(#a9)         ; read columns on port B
+        ei
+        ret
+
+; ----------------------------------------------------------------------------
+; ZX key code (Spectrum row*8+bit) -> MSX matrix code (row*8+bit), #ff =
+; no MSX equivalent. Same number, same key — source-portable KEY(n).
+; ----------------------------------------------------------------------------
+rbt_zx2msxkey:
+        defb    48,47,45,24,43,#ff,#ff,#ff  ; ZX row0: SHIFT Z X C V
+        defb    22,40,25,27,28,#ff,#ff,#ff  ; row1: A S D F G
+        defb    38,44,26,39,41,#ff,#ff,#ff  ; row2: Q W E R T
+        defb    1,2,3,4,5,#ff,#ff,#ff       ; row3: 1 2 3 4 5
+        defb    0,9,8,7,6,#ff,#ff,#ff       ; row4: 0 9 8 7 6
+        defb    37,36,30,42,46,#ff,#ff,#ff  ; row5: P O I U Y
+        defb    63,33,32,31,29,#ff,#ff,#ff  ; row6: ENTER L K J H
+        defb    64,49,34,35,23,#ff,#ff,#ff  ; row7: SPACE SYM(ctrl) M N B
+
+; ----------------------------------------------------------------------------
+; rbt_key - test one key. In: A = ZX code (row<<3 | bit). Out: A=1, 0 not.
+; ----------------------------------------------------------------------------
+rbt_key:
+        and     #3f
+        ld      e,a
+        ld      d,0
+        ld      hl,rbt_zx2msxkey
+        add     hl,de
+        ld      a,(hl)          ; MSX row*8+bit, or #ff
+        inc     a
+        ret     z               ; unmapped -> never pressed
+        dec     a
+        ld      e,a             ; E = code
+        and     7
+        ld      b,a             ; B = bit index
+        push    bc
+        ld      a,e
+        rrca
+        rrca
+        rrca
+        and     #0f             ; A = matrix row
+        call    rbt_kbd_scan
+        pop     bc
+        inc     b
+_sh     rra                     ; shift bit B into carry
+        djnz    _sh
+        ld      a,0
+        ret     c               ; bit was 1 -> not pressed
+        inc     a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_anykey - A = 1 if any key pressed
+; ----------------------------------------------------------------------------
+rbt_anykey:
+        call    rbt_kbd_any     ; core's raw sweep: A=#ff when nothing held
+        cpl
+        and     #ff
+        ret     z
+        ld      a,1
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_inkey - scan the matrix, return ASCII of first pressed key (or 0).
+; Shift (row6 bit0) selects the shifted table.
+; ----------------------------------------------------------------------------
+rbt_inkey:
+        ld      c,0             ; C = matrix row
+_il     ld      a,c
+        push    bc
+        call    rbt_kbd_scan
+        pop     bc
+        cp      #ff
+        jr      nz,_ibits       ; something held on this row
+        inc     c
+        ld      a,c
+        cp      11
+        jr      c,_il
+        xor     a
+        ret
+_ibits  ld      e,#ff           ; first 0 bit = first pressed key
+_ibl    inc     e
+        rra
+        jr      c,_ibl          ; bit 1 = not pressed -> next bit
+        ld      a,c             ; index = row*8 + bit
+        add     a,a
+        add     a,a
+        add     a,a
+        or      e
+        push    af
+        ld      a,6
+        call    rbt_kbd_scan    ; shift held? row 6 bit 0
+        bit     0,a
+        pop     af
+        ld      hl,rbt_kbdasc
+        jr      nz,_ilut        ; shift up -> unshifted table
+        ld      hl,rbt_kbdasc_sh
+_ilut   ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        ret
+
+; ----------------------------------------------------------------------------
+; MSX matrix -> ASCII, index = row*8+bit (bit 0 first). 0 = non-printing
+; key (arrows, function keys, control keys, numeric pad reports digits).
+; ----------------------------------------------------------------------------
+rbt_kbdasc:
+        defb    '0','1','2','3','4','5','6','7'   ; R0
+        defb    '8','9','-','=',0,'[',']',';'     ; R1 (\ unmapped intl)
+        defb    0,0,',','.','/',0,'a','b'         ; R2
+        defb    'c','d','e','f','g','h','i','j'   ; R3
+        defb    'k','l','m','n','o','p','q','r'   ; R4
+        defb    's','t','u','v','w','x','y','z'   ; R5
+        defb    0,0,0,0,0,0,0,0                   ; R6 mods/f-keys
+        defb    0,0,27,9,0,8,0,13                 ; R7 f4 f5 esc tab stop bs sel ret
+        defb    ' ',0,127,0,0,0,0,0               ; R8 space home ins del arrows
+        defb    '/','.',',','0','1','2','3','4'   ; R9 numpad
+        defb    '5','6','7','8','9','*','+',0     ; R10 numpad
+
+rbt_kbdasc_sh:                          ; same matrix, shift held
+        defb    ')','!','"','#','$','%','&','/'   ; R0
+        defb    '(',0,'_',0,0,'{','}',':'         ; R1
+        defb    0,0,';','<','?',0,'A','B'         ; R2
+        defb    'C','D','E','F','G','H','I','J'   ; R3
+        defb    'K','L','M','N','O','P','Q','R'   ; R4
+        defb    'S','T','U','V','W','X','Y','Z'   ; R5
+        defb    0,0,0,0,0,0,0,0                   ; R6
+        defb    0,0,27,9,0,8,0,13                 ; R7
+        defb    ' ',0,127,0,0,0,0,0               ; R8
+        defb    '/','.',',','0','1','2','3','4'   ; R9
+        defb    '5','6','7','8','9','*','+',0     ; R10
+
+; ----------------------------------------------------------------------------
+; rbt_joy - read joystick 1 via the PSG.
+;   Out: A = bitmask %000FUDLR (fire,up,down,left,right) - same shape as ZX.
+;   R15 bit6 selects the port (0 = joy1, 1 = joy2); R14 returns up/down/
+;   left/right/trigA/trigB, active low. joymode kept for source compat.
+; ----------------------------------------------------------------------------
+rbt_joymode     defb 0          ; written by JOYSTICK stmt; ignored on MSX
+
+rbt_joy:
+        di                      ; BIOS ISR touches the PSG too
+        ld      a,15
+        out     (#a0),a
+        in      a,(#a2)
+        and     #bf             ; bit6 = 0 -> joystick port 1
+        out     (#a1),a
+        ld      a,14
+        out     (#a0),a
+        in      a,(#a2)         ; b0-3 dir, b4 trigA, b5 trigB (0=pressed)
+        ei
+        cpl                     ; now 1 = pressed
+        ld      b,a
+        and     #30             ; either trigger -> result bit4
+        jr      z,_nof
+        ld      a,16
+        jr      _f
+_nof    xor     a
+_f      ld      c,a
+        ld      a,b
+        and     4               ; left -> bit1
+        rra
+        or      c
+        ld      c,a
+        ld      a,b
+        and     8               ; right -> bit0
+        rra
+        rra
+        rra
+        or      c
+        ld      c,a
+        ld      a,b
+        and     2               ; down -> bit2
+        add     a,a
+        or      c
+        ld      c,a
+        ld      a,b
+        and     1               ; up -> bit3
+        add     a,a
+        add     a,a
+        add     a,a
+        or      c
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_input - line editor. HL = dest buffer, B = max length (array size-1).
+; Echoes via rbt_putchar; 8/127 delete, 13 ends and NUL-terminates.
+; No auto-repeat: each accepted char waits for key release.
+; ----------------------------------------------------------------------------
+rbt_input:
+        ld      (rbt_in_ptr),hl
+        ld      a,b
+        ld      (rbt_in_max),a
+        xor     a
+        ld      (rbt_in_len),a
+_iw     call    rbt_inkey       ; A = ascii or 0
+        or      a
+        jr      z,_iw           ; wait for a press
+        cp      13
+        jr      z,_idone
+        cp      8
+        jr      z,_ibs
+        cp      127
+        jr      z,_ibs
+        cp      32
+        jr      c,_irel         ; ignore other control codes
+        ld      d,a             ; keep the char
+        ld      a,(rbt_in_max)
+        ld      e,a
+        ld      a,(rbt_in_len)
+        cp      e
+        jr      nc,_irel        ; buffer full
+        ld      a,d
+        ld      hl,(rbt_in_ptr)
+        ld      (hl),a
+        inc     hl
+        ld      (rbt_in_ptr),hl
+        ld      a,(rbt_in_len)
+        inc     a
+        ld      (rbt_in_len),a
+        ld      a,d
+        call    rbt_putchar     ; echo (clobbers regs - all state is in vars)
+        jr      _irel
+_ibs    ld      a,(rbt_in_len)  ; backspace
+        or      a
+        jr      z,_irel
+        dec     a
+        ld      (rbt_in_len),a
+        ld      hl,(rbt_in_ptr)
+        dec     hl
+        ld      (rbt_in_ptr),hl
+        call    _ibsch          ; erase the last printed char
+        jr      _irel
+_irel   call    rbt_inkey       ; wait for release before next press
+        or      a
+        jr      nz,_irel
+        jr      _iw
+_idone  ld      hl,(rbt_in_ptr)
+        xor     a
+        ld      (hl),a          ; NUL terminate
+_idrel  call    rbt_inkey       ; a held ENTER must release before we
+        or      a               ; return, or the next INPUT sees it again
+        jr      nz,_idrel
+        ret
+
+; erase one char: cursor back (wrapping up a row at col 0), space, back again
+_ibsch  ld      a,(rbt_col)
+        or      a
+        jr      nz,_bl
+        ld      a,(rbt_row)
+        dec     a
+        ld      (rbt_row),a
+        ld      a,31
+        jr      _bc
+_bl     dec     a
+_bc     ld      (rbt_col),a
+        ld      a,' '
+        call    rbt_putchar     ; prints space, advances cursor
+        ld      a,(rbt_col)
+        or      a
+        jr      nz,_b2
+        ld      a,(rbt_row)
+        dec     a
+        ld      (rbt_row),a
+        ld      a,31
+        jr      _b3
+_b2     dec     a
+_b3     ld      (rbt_col),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_match - HL = NUL-terminated buffer, DE = length-prefixed literal
+;   (defb len,"text"). Out: A = 1 on exact match else 0.
+; ----------------------------------------------------------------------------
+rbt_match:
+        ld      a,(de)          ; literal length
+        inc     de
+        ld      b,a
+_ml     ld      a,(de)
+        cp      (hl)
+        jr      nz,_mno
+        inc     hl
+        inc     de
+        djnz    _ml
+        ld      a,(hl)          ; buffer must end here too
+        or      a
+        jr      nz,_mno
+        ld      a,1
+        ret
+_mno    xor     a
+        ret
+
+rbt_in_ptr      defw    0
+rbt_in_len      defb    0
+rbt_in_max      defb    0
+''',
+    'pixel': r'''
+; ============================================================================
+; rbt_pixel_asm - pixel addressing, PLOT / POINT / LINE / SHOWPIC (MSX1/MSX2)
+;
+; Screen 2 with the identity name table: cell (y>>3, x>>3) owns pattern
+; index (y>>3)*32 + (x>>3), so pixel (x,y)'s pattern byte lives at VRAM
+; ((y>>3)*32 + (x>>3))*8 + (y&7) — a linear bitmap. Access is read-
+; modify-write through port #98.
+;
+; On RBT_MSX2 the *_5 paths run when rbt_smode=1: Screen 5 is a 4bpp
+; bitmap (addr = y*128 + x/2, nibble = x&1), and the 1bpp truth lives in
+; the rbt_shadow RAM plane (same index the SC2 routine computes) so
+; PLOT/POINT keep ZX bit semantics.
+; ============================================================================
+
+rbt_bitmask     defb #80,#40,#20,#10,#08,#04,#02,#01
+
+; ----------------------------------------------------------------------------
+; rbt_pix - pixel (x=C, y=B) -> HL = VRAM pattern address, A = bit mask
+; ----------------------------------------------------------------------------
+rbt_pix:
+        ld      a,b
+        and     #f8
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl           ; (y&~7)*4 = (y>>3)*32 = cell-row base
+        ld      a,c
+        rrca
+        rrca
+        rrca
+        and     31              ; x>>3
+        or      l
+        ld      l,a             ; HL = cell index
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; *8
+        ld      a,b
+        and     7
+        or      l
+        ld      l,a             ; += pixel row (low bits are 0)
+        ld      a,c
+        and     7
+        push    hl
+        ld      hl,rbt_bitmask
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        pop     hl
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_plot - plot pixel (x=C, y=B). Honours rbt_over (1 = invert).
+; ----------------------------------------------------------------------------
+rbt_plot:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_plot5
+        endif
+        call    rbt_pix         ; HL = addr, A = mask
+        ld      c,a             ; C = mask
+        call    rbt_vraddr
+        in      a,(#98)
+        ld      b,a             ; B = current byte
+        ld      a,(rbt_over)
+        or      a
+        jr      z,_set
+        ld      a,b
+        xor     c
+        jr      _wr
+_set    ld      a,b
+        or      c
+_wr     ld      b,a
+        call    rbt_vwaddr      ; HL still holds the cell addr
+        ld      a,b
+        out     (#98),a
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_plot5 - Screen 5 pixel plot. Updates the shadow bit (set, or toggle
+; on OVER), then RMWs the VRAM nibble: bit set -> fg, clear -> bg.
+; ----------------------------------------------------------------------------
+rbt_plot5:                      ; pixel (x=C, y=B)
+        call    rbt_pix         ; HL = shadow index, A = bit mask
+        push    de
+        ld      de,rbt_shadow
+        add     hl,de           ; HL = shadow byte
+        pop     de
+        ld      d,a             ; D = mask
+        ld      a,(rbt_over)
+        or      a
+        jr      z,_s
+        ld      a,d
+        xor     (hl)
+        jr      _w
+_s      ld      a,d
+        or      (hl)
+_w      ld      (hl),a          ; shadow updated
+        and     d               ; NZ = pixel now set
+        push    af
+        push    bc              ; save x in C (colbyte clobbers it)
+        call    rbt_colbyte     ; A = fg<<4|bg
+        ld      e,a             ; E = colour byte
+        pop     bc              ; B = y, C = x
+        pop     af              ; Z/NZ from the shadow bit
+        ld      a,e
+        jr      nz,_ink
+        and     #0f             ; bg nibble value
+        jr      _have
+_ink    rrca
+        rrca
+        rrca
+        rrca
+        and     #0f             ; fg nibble value
+_have   ld      d,a             ; D = pixel colour nibble
+        ; VRAM addr = y*128 + x/2
+        ld      l,b
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; y*128
+        ld      a,c
+        and     1               ; x&1: 0 = left (hi nibble), 1 = right
+        ld      b,a
+        srl     c               ; x/2
+        ld      a,c
+        or      l
+        ld      l,a             ; HL = VRAM addr
+        call    rbt_vraddr5
+        in      a,(#98)
+        ld      c,a             ; C = old byte
+        ld      a,b
+        or      a
+        jr      nz,_lo
+        ld      a,d
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a             ; colour in the high nibble
+        ld      b,a
+        ld      a,c
+        and     #0f
+        jr      _mg
+_lo     ld      a,c
+        and     #f0
+        ld      b,d
+_mg     or      b               ; merged byte
+        ld      b,a
+        call    rbt_vwaddr5
+        ld      a,b
+        out     (#98),a
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_point - test pixel (x=C, y=B). Out: A = 1 set, 0 clear
+; ----------------------------------------------------------------------------
+rbt_point:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_point5
+        endif
+        call    rbt_pix
+        ld      b,a
+        call    rbt_vraddr
+        in      a,(#98)
+        and     b
+        ret     z
+        ld      a,1
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_point5 - Screen 5 point test: the shadow plane holds the ZX-exact
+; bit, so no VRAM read is needed at all.
+; ----------------------------------------------------------------------------
+rbt_point5:
+        call    rbt_pix         ; HL = shadow index, A = mask
+        ld      b,a
+        ld      de,rbt_shadow
+        add     hl,de
+        ld      a,(hl)
+        and     b
+        ret     z
+        ld      a,1
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_line - draw line from (C,B) to (rbt_lx,rbt_ly) - Bresenham in the
+; additive form (all accumulators unsigned, no signed compares).
+; Honours rbt_over via rbt_plot. Clobbers everything.
+; ----------------------------------------------------------------------------
+rbt_line:
+        ld      a,b
+        ld      (rbt_y0),a
+        ld      a,c
+        ld      (rbt_x0),a
+        ; dx = |x1 - x|, sx = step
+        ld      a,(rbt_lx)
+        sub     c
+        jr      nc,_dxp
+        neg
+_dxp    ld      l,a
+        ld      h,0
+        ld      (rbt_ldx),hl
+        ld      a,(rbt_lx)
+        cp      c
+        ld      a,1
+        jr      nc,_sx
+        ld      a,-1
+_sx     ld      (rbt_lsx),a
+        ; dy = |y1 - y|, sy = step
+        ld      a,(rbt_ly)
+        sub     b
+        jr      nc,_dyp
+        neg
+_dyp    ld      l,a
+        ld      h,0
+        ld      (rbt_ldy),hl
+        ld      a,(rbt_ly)
+        cp      b
+        ld      a,1
+        jr      nc,_sy
+        ld      a,-1
+_sy     ld      (rbt_lsy),a
+        ; major axis: 0 = x (dx >= dy), 1 = y
+        ld      hl,(rbt_ldx)
+        ld      de,(rbt_ldy)
+        or      a
+        sbc     hl,de
+        ld      a,0
+        jr      nc,_maj
+        inc     a
+_maj    ld      (rbt_laxis),a
+        ld      hl,(rbt_ldx)
+        or      a
+        jr      z,_acc
+        ld      hl,(rbt_ldy)
+_acc    srl     h
+        rr      l               ; acc = long-axis delta / 2
+        ld      (rbt_lacc),hl
+_lp     ld      a,(rbt_x0)
+        ld      c,a
+        ld      a,(rbt_y0)
+        ld      b,a
+        call    rbt_plot
+        ld      a,(rbt_x0)
+        ld      hl,rbt_lx
+        cp      (hl)
+        jr      nz,_go
+        ld      a,(rbt_y0)
+        ld      hl,rbt_ly
+        cp      (hl)
+        ret     z               ; reached the endpoint
+_go     ld      a,(rbt_laxis)
+        or      a
+        jr      nz,_ym
+        ; x-major: x += sx; acc += dy; if acc >= dx: acc -= dx, y += sy
+        ld      a,(rbt_lsx)
+        ld      hl,rbt_x0
+        add     a,(hl)
+        ld      (hl),a
+        ld      hl,(rbt_lacc)
+        ld      de,(rbt_ldy)
+        add     hl,de
+        ld      de,(rbt_ldx)
+        or      a
+        sbc     hl,de
+        jr      c,_xns
+        ld      (rbt_lacc),hl
+        ld      a,(rbt_lsy)
+        ld      hl,rbt_y0
+        add     a,(hl)
+        ld      (hl),a
+        jr      _lp
+_xns    add     hl,de           ; acc+dy < dx: keep acc+dy
+        ld      (rbt_lacc),hl
+        jr      _lp
+_ym     ; y-major: y += sy; acc += dx; if acc >= dy: acc -= dy, x += sx
+        ld      a,(rbt_lsy)
+        ld      hl,rbt_y0
+        add     a,(hl)
+        ld      (hl),a
+        ld      hl,(rbt_lacc)
+        ld      de,(rbt_ldx)
+        add     hl,de
+        ld      de,(rbt_ldy)
+        or      a
+        sbc     hl,de
+        jr      c,_yns
+        ld      (rbt_lacc),hl
+        ld      a,(rbt_lsx)
+        ld      hl,rbt_x0
+        add     a,(hl)
+        ld      (hl),a
+        jr      _lp
+_yns    add     hl,de
+        ld      (rbt_lacc),hl
+        jr      _lp
+
+; ----------------------------------------------------------------------------
+; rbt_showpic - blit an encoded .rbc screen: 6144 pattern bytes then 6144
+; colour bytes, straight into the Screen 2 tables. In: HL = asset data.
+; ----------------------------------------------------------------------------
+rbt_showpic:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_showpic5
+        endif
+        ld      (rbt_sp_src),hl
+        push    hl
+        pop     de              ; DE = source
+        ld      hl,#0000        ; pattern table
+        ld      bc,6144
+        call    rbt_vwrite
+        ld      hl,(rbt_sp_src)
+        ld      de,6144
+        add     hl,de           ; source = asset + 6144 (colour data)
+        push    hl
+        pop     de
+        ld      hl,#2000        ; colour table
+        ld      bc,6144
+        call    rbt_vwrite
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_showpic5 - Screen 5 .rbc: per cell-row expand the pattern byte with
+; its colour byte into 4 nibbles (rbt_xpnib) and mirror the pattern into
+; the shadow plane. Three running pointers walk the source halves; the
+; VRAM destination is recomputed per cell-row (cells aren't contiguous).
+; ----------------------------------------------------------------------------
+rbt_showpic5:                   ; HL = .rbc (6144 pattern + 6144 colour)
+        ld      (rbt_sp_src),hl ; pattern src ptr
+        push    hl
+        pop     de
+        ld      hl,rbt_shadow
+        ld      (rbt_sp_sh),hl  ; shadow dst ptr
+        ld      hl,6144
+        add     hl,de
+        ld      (rbt_sp_cp),hl  ; colour src ptr
+        ld      hl,0
+        ld      (rbt_sp_i),hl   ; cell counter 0..767
+_cell   ld      hl,(rbt_sp_i)
+        ld      a,h
+        cp      3               ; 768 cells = #0300
+        ret     nc
+        ; VA of cell top-left = (idx>>5)*1024 + (idx&31)*4
+        ld      a,l
+        rrca
+        rrca
+        rrca
+        rrca
+        rrca
+        and     7               ; l>>5 (rows above this 8-col band)
+        ld      e,a
+        ld      a,h
+        add     a,a
+        add     a,a
+        add     a,a             ; h*8
+        or      e               ; A = cell row r
+        add     a,a
+        add     a,a             ; r*4 -> hi byte of r*1024
+        ld      d,a
+        ld      a,l
+        and     #1f             ; cell col
+        add     a,a
+        add     a,a             ; col*4
+        ld      e,a             ; DE = vram addr
+        ld      (rbt_sp_va),de
+        ld      b,8             ; 8 rows in the cell
+_row    push    bc
+        ld      hl,(rbt_sp_src) ; pattern byte -> A, ptr++
+        ld      a,(hl)
+        inc     hl
+        ld      (rbt_sp_src),hl
+        ld      hl,(rbt_sp_sh)  ; shadow store, ptr++
+        ld      (hl),a
+        inc     hl
+        ld      (rbt_sp_sh),hl
+        ld      hl,(rbt_sp_cp)  ; colour byte -> C, ptr++
+        ld      c,(hl)
+        inc     hl
+        ld      (rbt_sp_cp),hl
+        push    af              ; pattern byte survives vaddr set
+        ld      hl,(rbt_sp_va)
+        call    rbt_vwaddr5
+        pop     af
+        call    rbt_xpnib       ; 8 bits -> 4 bytes out #98
+        ld      hl,(rbt_sp_va)  ; next row: +128 bytes
+        ld      de,128
+        add     hl,de
+        ld      (rbt_sp_va),hl
+        pop     bc
+        djnz    _row
+        ld      hl,(rbt_sp_i)
+        inc     hl
+        ld      (rbt_sp_i),hl
+        jp      _cell
+
+rbt_sp_sh       defw 0          ; running shadow pointer (showpic5)
+rbt_sp_cp       defw 0          ; running colour-source pointer
+rbt_sp_va       defw 0          ; current cell-row VRAM address
+rbt_sp_i        defw 0          ; cell counter
+        endif
+
+; data
+rbt_x0          defb 0
+rbt_y0          defb 0
+rbt_lx          defb 0
+rbt_ly          defb 0
+rbt_lsx         defb 0
+rbt_lsy         defb 0
+rbt_laxis       defb 0
+rbt_ldx         defw 0
+rbt_ldy         defw 0
+rbt_lacc        defw 0
+rbt_sp_src      defw 0
+''',
+    'sfx': r'''
+; ============================================================================
+; rbt_sfx_asm - Rainbow sound effects via the PSG (MSX1)
+;
+; Same queue/drain model as the CPC engine: SFX queues an effect, the next
+; idle point (vsync/pause/waitkey/end/sprite update) drains and plays it
+; blocking. The player drives PSG channel C: it steals the music channel's
+; voice (the next .ray row reasserts the channel), or programs the mixer
+; itself when no music is running. PSG access is direct ports #A0/#A1.
+;
+; rbt_sfx       - queue an effect: HL = step data, A ignored (no banks)
+; rbt_sfx_drain - play the pending effect now if one is queued
+; rbt_sfx_play  - blocking player: HL = step data
+;
+; MSX-encoded .rsf step format (6 bytes):
+;   defb len          ; update iterations (0 = end of effect)
+;   defb dur          ; delay units between updates (~13T each)
+;   defw period       ; PSG tone period for channel C (q8)
+;   defw slide        ; signed delta added to period each iteration
+; ============================================================================
+
+rbt_sfx:
+        push    hl
+        push    af
+        call    rbt_sfx_drain         ; flush a queued effect first (ordering)
+        pop     af
+        pop     hl
+        ld      (rbt_sfx_pending),hl
+        ret
+
+rbt_sfx_drain:
+        ld      hl,(rbt_sfx_pending)
+        ld      a,h
+        or      l
+        ret     z
+        xor     a
+        ld      (rbt_sfx_pending),a
+        ld      (rbt_sfx_pending+1),a
+        jp      rbt_sfx_play          ; HL = step data already
+
+rbt_sfx_play:
+        ld      e,10                  ; channel C volume
+        ld      d,12
+        call    rbt_psg
+        ld      a,(rbt_ay_on)
+        or      a
+        jr      z,_mix0
+        ; music owns the mixer: steal its C voice - force tone C on and
+        ; noise C off, keeping the music's A/B channel bits.
+        ld      a,(rbt_ay_r7)
+        and     #fb                   ; bit2 = 0: tone C enabled
+        or      #20                   ; bit5 = 1: noise C disabled
+        ld      d,a
+        ld      e,7
+        call    rbt_psg
+        jr      _step
+_mix0   ld      e,7                   ; no music: tone C on, rest off
+        ld      d,#3b                 ; bits 0,1,3,4,5 set: C tone only
+        call    rbt_psg
+_step   ld      a,(hl)                ; len
+        or      a
+        jp      z,_done
+        ld      (rbt_sfx_len),a
+        inc     hl
+        ld      a,(hl)                ; dur units
+        inc     hl
+        ld      (rbt_sfx_dur),a
+        ld      a,(hl)                ; period lo
+        inc     hl
+        ld      (rbt_sfx_per),a
+        ld      a,(hl)                ; period hi
+        inc     hl
+        ld      (rbt_sfx_per+1),a
+        ld      a,(hl)                ; slide lo
+        inc     hl
+        ld      (rbt_sfx_sl),a
+        ld      a,(hl)                ; slide hi
+        inc     hl
+        ld      (rbt_sfx_sl+1),a
+        push    hl                    ; next-step pointer (HL = step+6)
+_iter   ; write channel C period (regs 4,5); data is q8 -> shift >>3
+        ld      a,(rbt_sfx_per)
+        ld      l,a
+        ld      a,(rbt_sfx_per+1)
+        ld      h,a
+        srl     h
+        rr      l
+        srl     h
+        rr      l
+        srl     h
+        rr      l                       ; HL = period
+        ld      d,l
+        ld      e,4
+        call    rbt_psg
+        ld      a,(rbt_sfx_per)
+        ld      l,a
+        ld      a,(rbt_sfx_per+1)
+        ld      h,a
+        srl     h
+        rr      l
+        srl     h
+        rr      l
+        srl     h
+        rr      l
+        ld      a,h
+        and     #0f
+        ld      d,a
+        ld      e,5
+        call    rbt_psg
+        ; delay: dur x ~13T loop
+        ld      a,(rbt_sfx_dur)
+        or      a
+        jr      nz,_w
+        inc     a
+_w      ld      b,a
+_wi     djnz    _wi
+        ; period += slide (clamp at 0)
+        ld      a,(rbt_sfx_per)
+        ld      e,a
+        ld      a,(rbt_sfx_per+1)
+        ld      d,a
+        ld      a,(rbt_sfx_sl)
+        ld      l,a
+        ld      a,(rbt_sfx_sl+1)
+        ld      h,a
+        add     hl,de
+        bit     7,h
+        jr      z,_pc
+        ld      hl,0
+_pc     ld      a,l
+        ld      (rbt_sfx_per),a
+        ld      a,h
+        ld      (rbt_sfx_per+1),a
+        ld      a,(rbt_sfx_len)
+        dec     a
+        ld      (rbt_sfx_len),a
+        jr      nz,_iter
+        pop     hl
+        jp      _step
+_done   ld      e,10                  ; channel C silent
+        ld      d,0
+        call    rbt_psg
+        ret
+
+rbt_sfx_pending defw    0             ; queued effect step ptr (0 = none)
+rbt_sfx_len     defb    0
+rbt_sfx_dur     defb    0
+rbt_sfx_per     defw    0
+rbt_sfx_sl      defw    0
+''',
+    'spcoll': r'''
+; ============================================================================
+; rbt_spcoll_asm - sprite <-> tilemap collision bridge (MSX1)
+; Sprite/sprite AABB lives in rbt_sprite.asm (same split as ZX/CPC);
+; this module only maps sprite bboxes onto map cells. Sprites are
+; uniformly 16x16 so the bbox is fixed-size.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; rbt_colltile - A = sprite id -> A = flags of first solid tile overlapped
+; (0 = none). Cell bbox spans (x..x+15, y..y+15).
+; ----------------------------------------------------------------------------
+rbt_colltile:
+        call    rbt_slot
+        ld      a,(ix+0)
+        bit     0,a
+        ret     z               ; inactive -> no collision
+        ld      a,(ix+1)
+        and     #f8
+        rrca
+        rrca
+        rrca
+        ld      (rbt_ct_c0),a   ; x>>3
+        ld      a,(ix+1)        ; (x+w-1)>>3 — real pixel width from the
+        add     a,(ix+13)       ; asset, not the 16px SAT slot
+        dec     a
+        and     #f8
+        rrca
+        rrca
+        rrca
+        ld      (rbt_ct_c1),a
+        ld      a,(ix+2)
+        and     #f8
+        rrca
+        rrca
+        rrca
+        ld      (rbt_ct_r0),a
+        ld      a,(ix+2)
+        add     a,(ix+14)
+        dec     a
+        and     #f8
+        rrca
+        rrca
+        rrca
+        ld      (rbt_ct_r1),a
+        ; loop rows r0..r1, cols c0..c1
+        ld      a,(rbt_ct_r0)
+        ld      (rbt_ct_r),a
+_cr     ld      a,(rbt_ct_c0)
+        ld      (rbt_ct_c),a
+_cc     ; inside view? (screen cell c,r within vx..vx+vw / vy..vy+vh)
+        ld      a,(rbt_tm_vx)
+        ld      b,a
+        ld      a,(rbt_ct_c)
+        cp      b
+        jr      c,_cskip
+        ld      a,(rbt_tm_vw)
+        add     a,b
+        ld      b,a
+        ld      a,(rbt_ct_c)
+        cp      b
+        jr      nc,_cskip
+        ld      a,(rbt_tm_vy)
+        ld      b,a
+        ld      a,(rbt_ct_r)
+        cp      b
+        jr      c,_cskip
+        ld      a,(rbt_tm_vh)
+        add     a,b
+        ld      b,a
+        ld      a,(rbt_ct_r)
+        cp      b
+        jr      nc,_cskip
+        ; map coords: mx = camx + (c - vx), my = camy + (r - vy)
+        ld      a,(rbt_ct_c)
+        ld      hl,rbt_tm_vx
+        sub     (hl)
+        ld      hl,rbt_tm_camx
+        add     a,(hl)
+        ld      b,a
+        ld      a,(rbt_ct_r)
+        ld      hl,rbt_tm_vy
+        sub     (hl)
+        ld      hl,rbt_tm_camy
+        add     a,(hl)
+        ld      c,a
+        call    rbt_tm_mapat    ; A = tile id
+        call    rbt_tileflags   ; A = flags
+        or      a
+        ret     nz              ; solid -> return flag bits
+_cskip  ld      a,(rbt_ct_c)
+        inc     a
+        ld      (rbt_ct_c),a
+        ld      hl,rbt_ct_c1
+        cp      (hl)
+        jr      c,_cc
+        jr      z,_cc
+        ld      a,(rbt_ct_r)
+        inc     a
+        ld      (rbt_ct_r),a
+        ld      hl,rbt_ct_r1
+        cp      (hl)
+        jr      c,_cr
+        jr      z,_cr
+        xor     a
+        ret
+
+; tile-bbox scratch (tmdata defines the rbt_ct_* set on ZX — kept here)
+rbt_ct_c0       defb 0
+rbt_ct_c1       defb 0
+rbt_ct_r0       defb 0
+rbt_ct_r1       defb 0
+rbt_ct_r        defb 0
+rbt_ct_c        defb 0
+''',
+    'sprite': r'''
+; ============================================================================
+; rbt_sprite_asm - hardware sprites via the Sprite Attribute Table (MSX1/2)
+;
+; 16 slots. Each sprite id owns SAT entry #id at #1B00+id*4 and SPT
+; pattern #id at #3800+id*32 (R1 was initialised for 16x16 sprites).
+; The .rbs encoder emits 32-byte octant patterns (TL,BL,TR,BR) + a
+; colour nibble — FRAME/ANIMATE just recopy the pattern bytes.
+;
+; On RBT_MSX2 (rbt_smode=1) the V9938 runs sprite mode 2: SAT moves to
+; #7600, patterns to #7800, and colour leaves the SAT for the Sprite
+; Colour Table at #7400 (16 bytes per sprite, one per line — we write
+; the same colour to all of them, keeping the single-colour contract).
+; The hide terminator is 216 and 8 sprites fit per scanline.
+; rbt_sp_remode re-uploads the tables after a MODE switch (hooked via
+; rbt_hook_mode).
+;
+; TMS9918 quirks honoured here:
+;   - SAT byte0 = screen row - 1 (sprite appears on line y+1), so
+;     stored coords are written minus 1 (same convention in mode 2).
+;   - y = 208 (#d0) is the SAT terminator — hiding writes 209, never 208.
+;   - Max 4 sprites per scanline (hardware limit; VDP flags it, we don't).
+;
+; Slot layout (12 bytes):
+;  +0  flags: bit0 active, bit1 hidden
+;  +1  x  +2  y          (screen coords, before the -1)
+;  +3  frame +4 nframes
+;  +5,6 frame data ptr   (asset + 4 — past the w/h/nframes/colour header)
+;  +7  colour nibble
+;  +8  animFirst +9 animLast +10 animFlags(b0 pingpong,b1 on) +11 animDir
+; ============================================================================
+
+RBT_NSLOTS      equ 16
+; slot layout (16 bytes — power-of-2 addressing):
+;  +0  flags: bit0 active, bit1 hidden
+;  +1  x  +2  y          (screen coords, before the -1)
+;  +3  frame +4 nframes
+;  +5,6 frame data ptr   (asset + 4 — past the w/h/nframes/colour header)
+;  +7  colour nibble
+;  +8  animFirst +9 animLast +10 animFlags(b0 pingpong,b1 on) +11 animDir
+;  +12 SAT offset (id*4)
+;  +13 w +14 h        (asset pixel size — COLLIDETILE's bbox; the SAT
+;                     entry is always 16x16 but the sprite may be smaller)
+;  +15 pad
+
+rbt_sprites     defs RBT_NSLOTS*16
+
+; ----------------------------------------------------------------------------
+; rbt_slot - A = sprite id -> IX = slot address (id*16). Preserves BC,DE,HL.
+; ----------------------------------------------------------------------------
+rbt_slot:
+        and     RBT_NSLOTS-1
+        push    de
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a             ; id*16
+        ld      e,a
+        ld      d,0
+        ld      ix,rbt_sprites
+        add     ix,de
+        pop     de
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_sp_spt - IX = slot -> copy the slot's current frame (32 bytes) into
+; its SPT pattern (#3800 + id*32 = #3800 + satoff*8). Clobbers A,BC,DE,HL.
+; ----------------------------------------------------------------------------
+rbt_sp_spt:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_sp_spt5
+        endif
+        ld      a,(ix+12)       ; satoff = id*4 (max 60)
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; id*32 — 16-bit, must not wrap a byte
+        ld      de,#3800
+        add     hl,de           ; SPT addr
+        ex      de,hl           ; DE = SPT dest
+        ; source = frameptr + frame*32
+        ld      l,(ix+5)
+        ld      h,(ix+6)
+        ld      a,(ix+3)        ; frame
+        or      a
+        jr      z,_src
+        ld      b,a
+_f32    ld      a,l
+        add     a,32
+        ld      l,a
+        jr      nc,_fc
+        inc     h
+_fc     djnz    _f32
+_src    ld      bc,32
+        push    de
+        push    hl
+        pop     de              ; DE = src
+        pop     hl              ; HL = dest
+        call    rbt_vwrite
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_sp_spt5 - Screen 5 pattern upload: same 32-byte frame, SPT at
+; #7800 + id*32 via the 17-bit writer.
+; ----------------------------------------------------------------------------
+rbt_sp_spt5:
+        ld      a,(ix+12)       ; satoff = id*4
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; id*32
+        ld      de,#7800
+        add     hl,de           ; SPT addr
+        ex      de,hl           ; DE = SPT dest
+        ld      l,(ix+5)
+        ld      h,(ix+6)
+        ld      a,(ix+3)        ; frame
+        or      a
+        jr      z,_src
+        ld      b,a
+_f32    ld      a,l
+        add     a,32
+        ld      l,a
+        jr      nc,_fc
+        inc     h
+_fc     djnz    _f32
+_src    ld      bc,32
+        push    de
+        push    hl
+        pop     de              ; DE = src
+        pop     hl              ; HL = dest
+        call    rbt_vwrite5
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_sp_sct - write the sprite's colour to its 16 Sprite Colour Table
+; bytes (#7400 + id*16) — one colour byte per line, same colour for all
+; (the .rbs single-colour contract). No-op outside Screen 5.
+; ----------------------------------------------------------------------------
+rbt_sp_sct:
+        ld      a,(rbt_smode)
+        or      a
+        ret     z               ; colour table only exists in mode 2
+        ld      a,(ix+12)       ; satoff = id*4
+        add     a,a
+        add     a,a             ; id*16
+        ld      l,a
+        ld      h,#74           ; HL = #7400 + id*16
+        call    rbt_vwaddr5
+        ld      a,(ix+7)        ; colour nibble
+        ld      b,16
+_sc     out     (#98),a
+        djnz    _sc
+        ret
+        else
+rbt_sp_sct:                     ; no SCT on MSX1 — single-colour SAT byte
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_sp_sat - IX = slot -> write the 4-byte SAT entry for this sprite at
+; #1B00 + satoff. Pattern number = id = satoff/4.
+; ----------------------------------------------------------------------------
+rbt_sp_sat:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_sp_sat5
+        endif
+        ld      a,(ix+12)       ; SAT offset (id*4)
+        ld      l,a
+        ld      h,#1b           ; HL = #1B00 + offset
+        ; hidden/inactive -> y = 209
+        ld      a,(ix+0)
+        and     3
+        ld      e,(ix+2)        ; y
+        cp      1
+        jr      z,_yy           ; active & !hidden
+        ld      e,209
+        jr      _yw
+_yy     dec     e               ; SAT y = row - 1
+_yw     call    rbt_vwaddr
+        ld      a,e
+        out     (#98),a         ; y
+        ld      a,(ix+1)
+        out     (#98),a         ; x
+        ld      a,l             ; pattern # = SAT offset (id*4): the VDP
+        out     (#98),a         ; indexes SPT in 8-byte units — each 16x16
+                                ; sprite occupies 4 consecutive 8-byte
+                                ; patterns, so id*4 points at its first.
+        ld      a,(ix+7)
+        out     (#98),a         ; colour
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_sp_sat5 - Screen 5 SAT write at #7600 + satoff. Mode 2: byte3 is
+; unused (colour lives in the SCT), hide value is 216.
+; ----------------------------------------------------------------------------
+rbt_sp_sat5:
+        ld      a,(ix+12)       ; SAT offset (id*4)
+        ld      l,a
+        ld      h,#76           ; HL = #7600 + offset
+        ld      a,(ix+0)
+        and     3
+        ld      e,(ix+2)        ; y
+        cp      1
+        jr      z,_yy           ; active & !hidden
+        ld      e,216           ; mode 2 terminator
+        jr      _yw
+_yy     dec     e               ; SAT y = row - 1
+_yw     call    rbt_vwaddr5
+        ld      a,e
+        out     (#98),a         ; y
+        ld      a,(ix+1)
+        out     (#98),a         ; x
+        ld      a,l             ; pattern # = SAT offset
+        out     (#98),a
+        xor     a
+        out     (#98),a         ; byte3 unused in mode 2
+        ret
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_sp_create - A=id, HL=asset, B=mode(unused), C=x, D=y, E=bank(unused)
+; asset: defb w,h,nframes,colour, 32-byte frames
+; ----------------------------------------------------------------------------
+rbt_sp_create:
+        push    hl
+        push    bc
+        push    af              ; id
+        call    rbt_slot
+        pop     af
+        add     a,a
+        add     a,a             ; SAT offset = id*4
+        ld      (ix+12),a
+        pop     bc
+        pop     hl
+        ld      (ix+0),1        ; active
+        ld      (ix+1),c        ; x
+        ld      (ix+2),d        ; y
+        ld      a,(hl)          ; w (pixels) -> +13 for COLLIDETILE's bbox
+        ld      (ix+13),a
+        inc     hl
+        ld      a,(hl)          ; h (pixels) -> +14
+        ld      (ix+14),a
+        inc     hl
+        ld      a,(hl)          ; nframes
+        ld      (ix+4),a
+        inc     hl
+        ld      a,(hl)          ; colour nibble
+        ld      (ix+7),a
+        inc     hl
+        ld      (ix+5),l
+        ld      (ix+6),h        ; frame data ptr
+        xor     a
+        ld      (ix+3),a        ; frame 0
+        ld      (ix+8),a
+        ld      (ix+9),a
+        ld      (ix+10),a       ; anim off
+        call    rbt_sp_spt
+        call    rbt_sp_sct      ; mode-2 colour table (no-op on SC2/MSX1)
+        jp      rbt_sp_sat
+
+; ----------------------------------------------------------------------------
+; rbt_sp_move - A=id, B=dx, C=dy (signed). Wraps at edges; hardware clips.
+; ----------------------------------------------------------------------------
+rbt_sp_move:
+        call    rbt_slot
+        ld      a,(ix+1)
+        add     a,b
+        ld      (ix+1),a
+        ld      a,(ix+2)
+        add     a,c
+        ld      (ix+2),a
+        jp      rbt_sp_sat
+
+; ----------------------------------------------------------------------------
+; rbt_sp_place - A=id, B=x, C=y (absolute)
+; ----------------------------------------------------------------------------
+rbt_sp_place:
+        call    rbt_slot
+        ld      (ix+1),b
+        ld      (ix+2),c
+        jp      rbt_sp_sat
+
+; ----------------------------------------------------------------------------
+; rbt_sp_frame - A=id, B=frame
+; ----------------------------------------------------------------------------
+rbt_sp_frame:
+        call    rbt_slot
+        ld      a,(ix+4)
+        or      a
+        ret     z
+        ld      a,b
+        cp      (ix+4)
+        jr      c,_ok
+        xor     a               ; clamp wraps to 0
+_ok     ld      (ix+3),a
+        jp      rbt_sp_spt
+
+; ----------------------------------------------------------------------------
+; rbt_sp_anim - A=id, B=first, C=last, D=pingpong. Marks animating; the
+; frame advance happens in rbt_sp_update.
+; ----------------------------------------------------------------------------
+rbt_sp_anim:
+        call    rbt_slot
+        ld      (ix+8),b
+        ld      (ix+9),c
+        ld      (ix+3),b        ; current = first
+        ld      a,d
+        and     1
+        or      2               ; pingpong flag | animating
+        ld      (ix+10),a
+        ld      (ix+11),1       ; dir +
+        jp      rbt_sp_spt
+
+; ----------------------------------------------------------------------------
+; rbt_sp_kill / rbt_sp_hide / rbt_sp_show / rbt_sp_draw - A=id
+; ----------------------------------------------------------------------------
+rbt_sp_kill:
+        call    rbt_slot
+        ld      (ix+0),0        ; inactive
+        jp      rbt_sp_sat      ; writes y=209
+
+rbt_sp_hide:
+        call    rbt_slot
+        set     1,(ix+0)
+        jp      rbt_sp_sat
+
+rbt_sp_show:
+        call    rbt_slot
+        res     1,(ix+0)
+        jp      rbt_sp_sat
+
+rbt_sp_draw:
+        call    rbt_slot
+        bit     0,(ix+0)
+        ret     z
+        call    rbt_sp_spt
+        jp      rbt_sp_sat
+
+; ----------------------------------------------------------------------------
+; rbt_sp_attr - A=id, B=ZX attr (ink|paper<<3|bright<<6). Only the ink
+; half maps — MSX sprites are single-colour.
+; ----------------------------------------------------------------------------
+rbt_sp_attr:
+        call    rbt_slot
+        ld      a,b
+        and     7
+        ld      c,a
+        ld      a,b
+        and     #40
+        rrca
+        rrca
+        rrca
+        or      c
+        ld      hl,rbt_zx2msx
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        ld      (ix+7),a
+        call    rbt_sp_sct      ; mode-2 colour table (no-op on SC2/MSX1)
+        jp      rbt_sp_sat
+
+; ----------------------------------------------------------------------------
+; rbt_sp_update - tick animations and refresh every active sprite
+; ----------------------------------------------------------------------------
+rbt_sp_update:
+        ld      b,RBT_NSLOTS
+        ld      c,0             ; id
+_up     push    bc
+        ld      a,c
+        call    rbt_slot
+        bit     0,(ix+0)
+        jr      z,_next
+        bit     1,(ix+10)       ; animating?
+        jr      z,_noanim
+        ld      a,(ix+3)
+        add     a,(ix+11)       ; frame += dir
+        ld      d,a
+        ld      a,(ix+11)
+        or      a
+        jp      p,_fwd
+        ld      a,d             ; dir - : below first?
+        ld      e,(ix+8)
+        cp      e
+        jr      nc,_set
+        bit     0,(ix+10)       ; pingpong?
+        jr      nz,_pp1
+        ld      a,(ix+9)        ; wrap to last
+        ld      d,a
+        jr      _set
+_pp1    ld      (ix+11),1       ; bounce up
+        ld      d,(ix+8)
+        jr      _set
+_fwd    ld      a,d             ; dir + : above last?
+        ld      e,(ix+9)
+        cp      e
+        jr      c,_set
+        jr      z,_set
+        bit     0,(ix+10)
+        jr      nz,_pp2
+        ld      d,(ix+8)        ; wrap to first
+        jr      _set
+_pp2    ld      (ix+11),#ff     ; bounce down
+        ld      d,(ix+9)
+_set    ld      (ix+3),d
+        call    rbt_sp_spt
+_noanim call    rbt_sp_sat
+_next   pop     bc
+        inc     c
+        djnz    _up
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_sp_drawall - refresh every active sprite (SAT + pattern)
+; ----------------------------------------------------------------------------
+rbt_sp_drawall:
+        ld      b,RBT_NSLOTS
+        ld      c,0
+_da     push    bc
+        ld      a,c
+        call    rbt_slot
+        bit     0,(ix+0)
+        jr      z,_dnext
+        call    rbt_sp_spt
+        call    rbt_sp_sat
+_dnext  pop     bc
+        inc     c
+        djnz    _da
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_spx / rbt_spy - A=id -> HL = stored x / y (screen coords)
+; ----------------------------------------------------------------------------
+rbt_spx:
+        call    rbt_slot
+        ld      a,(ix+1)
+        ret
+
+rbt_spy:
+        call    rbt_slot
+        ld      a,(ix+2)
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_spcoll - A = id1, B = id2 -> A = 1 when the 16x16 boxes overlap.
+; Lives here (not in spcoll.asm) because SPRITECOLLIDE only pulls the
+; sprite module — same split as the ZX/CPC runtimes.
+; ----------------------------------------------------------------------------
+rbt_spcoll:
+        call    rbt_slot
+        bit     0,(ix+0)        ; active?
+        jr      z,_no
+        ld      a,(ix+1)
+        ld      (rbt_sc_x1),a
+        ld      a,(ix+2)
+        ld      (rbt_sc_y1),a
+        ld      a,b
+        call    rbt_slot
+        bit     0,(ix+0)
+        jr      z,_no
+        ; |x1-x2| < 16 && |y1-y2| < 16
+        ld      a,(rbt_sc_x1)
+        sub     (ix+1)
+        jr      nc,_dx
+        neg
+_dx     cp      16
+        jr      nc,_no
+        ld      a,(rbt_sc_y1)
+        sub     (ix+2)
+        jr      nc,_dy
+        neg
+_dy     cp      16
+        jr      nc,_no
+        ld      a,1
+        ret
+_no     xor     a
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_sp_remode - sprite-table refresh after a MODE switch (called via
+; rbt_hook_mode): hide every SAT entry for the new mode's table, then
+; re-upload pattern/colour/attribute for each active sprite.
+; ----------------------------------------------------------------------------
+rbt_sp_remode:
+        ld      a,(rbt_smode)
+        or      a
+        jr      nz,_m5
+        ; back to Screen 2: hide all 32 (y=209), refresh actives
+        ld      a,209
+        ld      hl,#1b00
+        ld      bc,128
+        call    rbt_vfill
+        jp      rbt_sp_drawall
+_m5     ; Screen 5: hide all 32 (y=216), clear SCT, refresh actives
+        ld      a,216
+        ld      hl,#7600
+        ld      bc,128
+        call    rbt_vfill5
+        xor     a
+        ld      hl,#7400
+        ld      bc,512
+        call    rbt_vfill5
+        ld      b,RBT_NSLOTS
+        ld      c,0             ; id
+_up     push    bc
+        ld      a,c
+        call    rbt_slot
+        bit     0,(ix+0)
+        jr      z,_next
+        call    rbt_sp_spt5
+        call    rbt_sp_sct
+        call    rbt_sp_sat5
+_next   pop     bc
+        inc     c
+        djnz    _up
+        ret
+        endif
+
+rbt_sc_x1       defb 0
+rbt_sc_y1       defb 0
+''',
+    'tilemap': r'''
+; ============================================================================
+; rbt_tilemap_asm - tilemap engine (MSX1/MSX2)
+;
+; Screen 2's name table IS the tile grid: a tile = 8 pattern bytes + 8
+; colour bytes in the cell's VRAM slots. No shifting, no masks — the
+; whole engine is camera maths + table lookups.
+;
+; On RBT_MSX2 (rbt_smode=1) cells expand into the 4bpp bitmap instead —
+; no nametable means the scroll fast path falls back to camera-step +
+; full-view redraw, and rbt_tm_cell5 is the only SC5 draw entry.
+;
+;   TILESET "x"   -> rbt_tm_settiles   .rbt: defb n, 8n bitmap, n attr, n flags
+;   TILEMAP BIND  -> rbt_tm_setmap     .rbm: defb w, h, w*h cells
+;   TILEMAP VIEW  -> rbt_tm_view       B,C,D,E = x,y,w,h (screen cells)
+;   TILEMAP CAMERA-> rbt_tm_camera     B,C = map cell offset
+;   TILEMAP DRAW  -> rbt_tm_draw       blit the view from the camera
+;   TILEMAP SCROLL-> rbt_tm_scroll     A = dir (0L 1R 2U 3D), B = steps
+;   TILEMAP REDRAW-> rbt_tm_redraw     B,C,D,E = view cells to redraw
+;
+; v1 scrolls by camera-step + full redraw — correct but not optimal.
+; ============================================================================
+
+; ----------------------------------------------------------------------------
+; rbt_tm_settiles - HL = tileset asset
+; ----------------------------------------------------------------------------
+rbt_tm_settiles:
+        ld      (rbt_tm_tiles),hl
+        ld      a,(hl)
+        ld      (rbt_tm_n),a
+        inc     hl
+        ld      (rbt_tm_bmp),hl
+        ld      e,a
+        add     a,a
+        add     a,a
+        add     a,a             ; n*8
+        ld      e,a
+        ld      d,0
+        add     hl,de
+        ld      (rbt_tm_tattr),hl
+        ld      a,(rbt_tm_n)
+        ld      e,a
+        add     hl,de
+        ld      (rbt_tm_tflags),hl
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_setmap - HL = map asset: defb w, h, cells...
+; ----------------------------------------------------------------------------
+rbt_tm_setmap:
+        ld      (rbt_tm_map),hl
+        ld      a,(hl)
+        ld      (rbt_tm_mw),a
+        inc     hl
+        ld      a,(hl)
+        ld      (rbt_tm_mh),a
+        inc     hl
+        ld      (rbt_tm_cells),hl
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_view - B,C,D,E = x,y,w,h screen cells
+; ----------------------------------------------------------------------------
+rbt_tm_view:
+        ld      a,b
+        ld      (rbt_tm_vx),a
+        ld      a,c
+        ld      (rbt_tm_vy),a
+        ld      a,d
+        ld      (rbt_tm_vw),a
+        ld      a,e
+        ld      (rbt_tm_vh),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_camera - B,C = map cell offset
+; ----------------------------------------------------------------------------
+rbt_tm_camera:
+        ld      a,b
+        ld      (rbt_tm_camx),a
+        ld      a,c
+        ld      (rbt_tm_camy),a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_acol - A = ZX attr -> A = MSX colour byte (fg<<4|bg via palette)
+; ----------------------------------------------------------------------------
+rbt_tm_acol:
+        ld      e,a
+        and     7
+        ld      c,a
+        ld      a,e
+        and     #40
+        rrca
+        rrca
+        rrca
+        or      c               ; fg index
+        ld      hl,rbt_zx2msx
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        add     a,a
+        add     a,a
+        add     a,a
+        add     a,a
+        ld      c,a             ; fg<<4
+        ld      a,(rbt_tm_att)
+        rrca
+        rrca
+        rrca
+        and     #0f             ; paper|bright -> index
+        ld      hl,rbt_zx2msx
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        or      c
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_cell - draw tile D at screen cell (col B, row C).
+; Writes 8 pattern bytes + 8 colour bytes. Clobbers all.
+; ----------------------------------------------------------------------------
+rbt_tm_cell:
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jp      nz,rbt_tm_cell5
+        endif
+        ld      a,d
+        ld      (rbt_tm_tid),a
+        ; cell index = row*32+col; its high byte is the pattern third
+        ld      a,c
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; row*32
+        ld      a,b
+        or      l
+        ld      l,a             ; hl = row*32+col (h = third 0/1/2)
+        ld      a,h
+        ld      (rbt_tm_th),a   ; remember the third
+        ; read the cell's nametable value -> the pattern index it shows.
+        ; (after a nametable-shift scroll this is a neighbour's index —
+        ; writing there keeps the redraw on the right pattern slot)
+        ld      de,#1800
+        add     hl,de
+        call    rbt_vraddr
+        in      a,(#98)
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; index*8
+        ld      a,(rbt_tm_th)
+        add     a,a
+        add     a,a
+        add     a,a             ; third*8 = high byte of third*0x800
+        ld      d,a
+        ld      e,0
+        add     hl,de           ; pa = third*0x800 + index*8
+        ld      (rbt_tm_pa),hl
+        ; src = bmp + tid*8
+        ld      hl,(rbt_tm_bmp)
+        ld      a,(rbt_tm_tid)
+        add     a,a
+        add     a,a
+        add     a,a
+        ld      e,a
+        ld      d,0
+        add     hl,de
+        ex      de,hl           ; DE = src
+        ld      hl,(rbt_tm_pa)
+        ld      bc,8
+        call    rbt_vwrite
+        ; colour byte from tile attr
+        ld      hl,(rbt_tm_tattr)
+        ld      a,(rbt_tm_tid)
+        ld      e,a
+        ld      d,0
+        add     hl,de
+        ld      a,(hl)
+        ld      (rbt_tm_att),a
+        call    rbt_tm_acol     ; A = colour byte
+        ld      c,a
+        ld      hl,(rbt_tm_pa)
+        ld      de,#2000
+        add     hl,de
+        call    rbt_vwaddr
+        ld      b,8
+_cf     ld      a,c
+        out     (#98),a
+        djnz    _cf
+        ret
+
+        if      RBT_MSX2
+; ----------------------------------------------------------------------------
+; rbt_tm_cell5 - Screen 5 tile draw at screen cell (col B, row C): no
+; nametable — the bitmap address is fixed (row*1024 + col*4, stride
+; 128). Each pattern byte lands in rbt_shadow and expands via rbt_xpnib
+; with the tile's colour byte.
+; ----------------------------------------------------------------------------
+rbt_tm_cell5:
+        ld      a,d
+        ld      (rbt_tm_tid),a
+        ; shadow ptr = rbt_shadow + (row*32+col)*8
+        ld      a,c
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; row*32
+        ld      a,b
+        or      l
+        ld      l,a             ; cellidx
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; *8
+        ld      de,rbt_shadow
+        add     hl,de
+        ld      (rbt_tm_sh5),hl
+        ; vram addr = row*1024 + col*4
+        ld      a,c
+        add     a,a
+        add     a,a             ; row*4 -> hi byte of row*1024
+        ld      h,a
+        ld      a,b
+        add     a,a
+        add     a,a             ; col*4
+        ld      l,a
+        ld      (rbt_tm_va5),hl
+        ; src = bmp + tid*8
+        ld      hl,(rbt_tm_bmp)
+        ld      a,(rbt_tm_tid)
+        add     a,a
+        add     a,a
+        add     a,a
+        ld      e,a
+        ld      d,0
+        add     hl,de
+        ld      (rbt_tm_src5),hl
+        ; colour byte from the tile's attr
+        ld      hl,(rbt_tm_tattr)
+        ld      a,(rbt_tm_tid)
+        ld      e,a
+        ld      d,0
+        add     hl,de
+        ld      a,(hl)
+        ld      (rbt_tm_att),a
+        call    rbt_tm_acol     ; A = fg<<4|bg
+        ld      (rbt_tm_cb5),a
+        ld      b,8
+_row    push    bc
+        ld      hl,(rbt_tm_src5)  ; pattern byte, src ptr++
+        ld      e,(hl)
+        inc     hl
+        ld      (rbt_tm_src5),hl
+        ld      hl,(rbt_tm_sh5)  ; shadow store, ptr++
+        ld      (hl),e
+        inc     hl
+        ld      (rbt_tm_sh5),hl
+        ld      hl,(rbt_tm_va5)
+        call    rbt_vwaddr5     ; DE-preserved 17-bit vaddr
+        ld      a,(rbt_tm_cb5)
+        ld      c,a             ; C = fg<<4|bg
+        ld      a,e             ; A = pattern
+        call    rbt_xpnib       ; 8 bits -> 4 bytes out #98
+        ld      hl,(rbt_tm_va5)
+        ld      de,128
+        add     hl,de
+        ld      (rbt_tm_va5),hl
+        pop     bc
+        djnz    _row
+        ret
+
+rbt_tm_sh5      defw 0          ; running shadow pointer (cell5)
+rbt_tm_va5      defw 0          ; current cell-row VRAM addr
+rbt_tm_src5     defw 0          ; running tile-pattern pointer
+rbt_tm_cb5      defb 0          ; colour byte of the tile being drawn
+        endif
+
+; ----------------------------------------------------------------------------
+; rbt_tm_blit - draw a view-rect of map cells to the screen.
+; Rect (view-relative cells) in rbt_tm_rx/ry/rw/rh.
+; ----------------------------------------------------------------------------
+rbt_tm_blit:
+        xor     a
+        ld      (rbt_tm_r),a
+_dr     ld      a,(rbt_tm_r)
+        ld      hl,rbt_tm_rh
+        cp      (hl)
+        ret     nc
+        xor     a
+        ld      (rbt_tm_c),a
+_dc     ld      a,(rbt_tm_c)
+        ld      hl,rbt_tm_rw
+        cp      (hl)
+        jr      nc,_rdone
+        ; map coords: mx = camx + rx + c, my = camy + ry + r
+        ld      a,(rbt_tm_camx)
+        ld      hl,rbt_tm_rx
+        add     a,(hl)
+        ld      hl,rbt_tm_c
+        add     a,(hl)
+        ld      b,a
+        ld      a,(rbt_tm_camy)
+        ld      hl,rbt_tm_ry
+        add     a,(hl)
+        ld      hl,rbt_tm_r
+        add     a,(hl)
+        ld      c,a
+        call    rbt_tm_mapat    ; A = tile id (0 OOB)
+        ld      d,a
+        ; screen cell: col = vx + rx + c, row = vy + ry + r
+        ld      a,(rbt_tm_vx)
+        ld      hl,rbt_tm_rx
+        add     a,(hl)
+        ld      hl,rbt_tm_c
+        add     a,(hl)
+        ld      b,a
+        ld      a,(rbt_tm_vy)
+        ld      hl,rbt_tm_ry
+        add     a,(hl)
+        ld      hl,rbt_tm_r
+        add     a,(hl)
+        ld      c,a
+        call    rbt_tm_cell
+        ld      hl,rbt_tm_c
+        inc     (hl)
+        jr      _dc
+_rdone  ld      hl,rbt_tm_r
+        inc     (hl)
+        jr      _dr
+
+; ----------------------------------------------------------------------------
+; rbt_tm_draw - blit the whole view
+; ----------------------------------------------------------------------------
+rbt_tm_draw:
+        xor     a
+        ld      (rbt_tm_rx),a
+        ld      (rbt_tm_ry),a
+        ld      a,(rbt_tm_vw)
+        ld      (rbt_tm_rw),a
+        ld      a,(rbt_tm_vh)
+        ld      (rbt_tm_rh),a
+        jp      rbt_tm_blit
+
+; ----------------------------------------------------------------------------
+; rbt_tm_redraw - B,C,D,E = view cells to redraw
+; ----------------------------------------------------------------------------
+rbt_tm_redraw:
+        ld      a,b
+        ld      (rbt_tm_rx),a
+        ld      a,c
+        ld      (rbt_tm_ry),a
+        ld      a,d
+        ld      (rbt_tm_rw),a
+        ld      a,e
+        ld      (rbt_tm_rh),a
+        jp      rbt_tm_blit
+
+; ----------------------------------------------------------------------------
+; rbt_tm_scroll - A = dir (0=left 1=right 2=up 3=down), B = steps.
+; v1: adjust camera + full redraw per step.
+; ----------------------------------------------------------------------------
+rbt_tm_scroll:
+        and     3
+        ld      e,a             ; dir
+        ld      (rbt_tm_dir),a  ; keep it — the dispatch below consumes e
+        ld      a,b
+        or      a
+        ret     z
+        ld      d,a             ; steps
+_sl     push    de
+        ld      a,e
+        or      a
+        jr      nz,_s1
+        ld      a,(rbt_tm_camx) ; left: camx--
+        or      a
+        jr      z,_snext
+        dec     a
+        ld      (rbt_tm_camx),a
+        jr      _sgo
+_s1     dec     e
+        jr      nz,_s2
+        ld      a,(rbt_tm_camx) ; right: camx++ while camx+vw < mw
+        ld      hl,rbt_tm_vw
+        add     a,(hl)
+        ld      hl,rbt_tm_mw
+        cp      (hl)
+        jr      nc,_snext
+        ld      hl,rbt_tm_camx
+        inc     (hl)
+        jr      _sgo
+_s2     dec     e
+        jr      nz,_s3
+        ld      a,(rbt_tm_camy) ; up: camy--
+        or      a
+        jr      z,_snext
+        dec     a
+        ld      (rbt_tm_camy),a
+        jr      _sgo
+_s3     ld      a,(rbt_tm_camy) ; down: camy++ while camy+vh < mh
+        ld      hl,rbt_tm_vh
+        add     a,(hl)
+        ld      hl,rbt_tm_mh
+        cp      (hl)
+        jr      nc,_snext
+        ld      hl,rbt_tm_camy
+        inc     (hl)
+_sgo
+        if      RBT_MSX2
+        ld      a,(rbt_smode)
+        or      a
+        jr      nz,_sfull       ; SC5 has no nametable to shift —
+        endif                   ; every direction redraws the view
+        ld      a,(rbt_tm_dir)
+        or      a
+        jr      z,_sleft
+        dec     a
+        jr      z,_sright
+_sfull  call    rbt_tm_draw     ; up/down (and all dirs on SC5): full redraw
+        jr      _snext
+_sright call    rbt_tm_shiftl   ; camx++ -> content shifts left
+        call    rbt_tm_edger
+        jr      _snext
+_sleft  call    rbt_tm_shiftr   ; camx-- -> content shifts right
+        call    rbt_tm_edgel
+_snext  pop     de
+        dec     d
+        jr      nz,_sl
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_shiftl / rbt_tm_shiftr - shift the view's nametable cells by one
+; horizontally, so each cell shows its neighbour's pattern (content scroll).
+; ----------------------------------------------------------------------------
+rbt_tm_shiftl:
+        xor     a
+        ld      (rbt_tm_r),a    ; r = 0..vh-1
+_slrow  ld      a,(rbt_tm_r)
+        ld      hl,rbt_tm_vh
+        cp      (hl)
+        ret     nc
+        ; dest addr = nt + (row)*32 + vx ... write right-neighbour's value
+        call    rbt_tm_ntrow          ; HL = nt + row*32 + vx
+        ld      b,0
+        ld      a,(rbt_tm_vw)
+        dec     a
+        ld      b,a
+_slcol  push    bc
+        push    hl
+        inc     hl
+        call    rbt_vraddr
+        in      a,(#98)         ; value of cell to the right
+        pop     hl
+        push    af
+        call    rbt_vwaddr
+        pop     af
+        out     (#98),a
+        inc     hl
+        pop     bc
+        djnz    _slcol
+        ld      hl,rbt_tm_r
+        inc     (hl)
+        jr      _slrow
+
+rbt_tm_shiftr:
+        xor     a
+        ld      (rbt_tm_r),a
+_srrow  ld      a,(rbt_tm_r)
+        ld      hl,rbt_tm_vh
+        cp      (hl)
+        ret     nc
+        call    rbt_tm_ntrow
+        ld      a,(rbt_tm_vw)
+        dec     a
+        ld      d,0
+        ld      e,a
+        add     hl,de           ; start at the right edge, walk left
+        ld      b,a
+_srcol  push    bc
+        push    hl
+        dec     hl
+        call    rbt_vraddr
+        in      a,(#98)
+        pop     hl
+        push    af
+        call    rbt_vwaddr
+        pop     af
+        out     (#98),a
+        dec     hl
+        pop     bc
+        djnz    _srcol
+        ld      hl,rbt_tm_r
+        inc     (hl)
+        jr      _srrow
+
+; HL = nametable addr of view-cell (vx, vy+r)
+rbt_tm_ntrow  ld      a,(rbt_tm_vy)
+        ld      hl,rbt_tm_r
+        add     a,(hl)          ; screen row
+        ld      l,a
+        ld      h,0
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl
+        add     hl,hl           ; row*32
+        ld      a,(rbt_tm_vx)
+        ld      d,#18           ; nt base #1800
+        ld      e,a
+        add     hl,de
+        ret
+
+; ----------------------------------------------------------------------------
+; edge column redraws after a shift — draw the newly-revealed map cells.
+; ----------------------------------------------------------------------------
+rbt_tm_edger:
+        ld      a,(rbt_tm_vw)
+        dec     a
+        ld      (rbt_tm_c),a    ; view col = vw-1
+        jp      rbt_tm_edge
+rbt_tm_edgel:
+        xor     a
+        ld      (rbt_tm_c),a    ; view col = 0
+rbt_tm_edge:
+        xor     a
+        ld      (rbt_tm_r),a
+_er     ld      a,(rbt_tm_r)
+        ld      hl,rbt_tm_vh
+        cp      (hl)
+        ret     nc
+        ; map coords: mx = camx + c, my = camy + r
+        ld      a,(rbt_tm_camx)
+        ld      hl,rbt_tm_c
+        add     a,(hl)
+        ld      b,a
+        ld      a,(rbt_tm_camy)
+        ld      hl,rbt_tm_r
+        add     a,(hl)
+        ld      c,a
+        call    rbt_tm_mapat
+        ld      d,a
+        ; screen cell: col = vx + c, row = vy + r
+        ld      a,(rbt_tm_vx)
+        ld      hl,rbt_tm_c
+        add     a,(hl)
+        ld      b,a
+        ld      a,(rbt_tm_vy)
+        ld      hl,rbt_tm_r
+        add     a,(hl)
+        ld      c,a
+        call    rbt_tm_cell
+        ld      hl,rbt_tm_r
+        inc     (hl)
+        jr      _er
+
+; ----------------------------------------------------------------------------
+; rbt_tileat - B=tx, C=ty (map coords) -> A = tile id, 255 when OOB
+; ----------------------------------------------------------------------------
+rbt_tileat:
+        ld      a,b
+        ld      hl,rbt_tm_mw
+        cp      (hl)
+        jr      nc,_oob
+        ld      a,c
+        ld      hl,rbt_tm_mh
+        cp      (hl)
+        jr      nc,_oob
+        jp      rbt_tm_mapat
+_oob    ld      a,255
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tileatset - B=tx, C=ty, D=id : write map cell if in bounds, then
+; redraw the cell when it's inside the view.
+; ----------------------------------------------------------------------------
+rbt_tileatset:
+        ld      a,b
+        ld      hl,rbt_tm_mw
+        cp      (hl)
+        ret     nc
+        ld      a,c
+        ld      hl,rbt_tm_mh
+        cp      (hl)
+        ret     nc
+        ld      a,d
+        ld      (rbt_tm_tid),a
+        ; addr = cells + ty*mw + tx  (same calc as mapat)
+        ld      a,c
+        ld      hl,rbt_tm_mw
+        ld      e,(hl)
+        ld      d,0
+        ld      hl,0
+        or      a
+        jr      z,_row
+_mul    add     hl,de
+        dec     a
+        jr      nz,_mul
+_row    ld      d,0
+        ld      e,b
+        add     hl,de
+        ld      de,(rbt_tm_cells)
+        add     hl,de
+        ld      a,(rbt_tm_tid)
+        ld      (hl),a
+        ; in view? view col = tx - camx, row = ty - camy
+        ld      a,b
+        ld      hl,rbt_tm_camx
+        sub     (hl)
+        ret     c
+        ld      hl,rbt_tm_vw
+        cp      (hl)
+        ret     nc
+        ld      b,a
+        ld      a,c
+        ld      hl,rbt_tm_camy
+        sub     (hl)
+        ret     c
+        ld      hl,rbt_tm_vh
+        cp      (hl)
+        ret     nc
+        ld      c,a
+        ld      a,(rbt_tm_vx)
+        add     a,b
+        ld      b,a
+        ld      a,(rbt_tm_vy)
+        add     a,c
+        ld      c,a
+        ld      a,(rbt_tm_tid)
+        ld      d,a
+        jp      rbt_tm_cell
+
+; ----------------------------------------------------------------------------
+; rbt_tileflags - A = tile id -> A = flags byte (0 if out of range)
+; ----------------------------------------------------------------------------
+rbt_tileflags:
+        ld      hl,rbt_tm_n
+        cp      (hl)
+        jr      nc,_z
+        ld      hl,(rbt_tm_tflags)
+        ld      d,0
+        ld      e,a
+        add     hl,de
+        ld      a,(hl)
+        ret
+_z      xor     a
+        ret
+
+; ----------------------------------------------------------------------------
+; data
+; ----------------------------------------------------------------------------
+rbt_tm_pa       defw 0          ; pattern addr of cell being drawn
+rbt_tm_th       defb 0          ; pattern third (0/1/2) of the cell
+rbt_tm_dir      defb 0          ; last scroll direction
+rbt_tm_att      defb 0          ; attr byte being converted
+rbt_tm_tid      defb 0          ; tile id scratch
+rbt_tm_rx       defb 0          ; blit rect (view cells)
+rbt_tm_ry       defb 0
+rbt_tm_rw       defb 0
+rbt_tm_rh       defb 0
+''',
+    'tmdata': r'''
+; ============================================================================
+; rbt_tmdata_asm - tilemap state + map query (shared by tilemap engine)
+; Var layouts documented in rbt_tilemap.asm. Bank vars kept for source
+; parity — pg_in/out are no-op stubs when the bank module is absent.
+; ============================================================================
+
+rbt_tm_tiles    defw 0          ; tileset base
+rbt_tm_bmp      defw 0          ; bitmaps (tiles+1)
+rbt_tm_tattr    defw 0          ; attr table (tiles+1+8n)
+rbt_tm_tflags   defw 0          ; flag table (tiles+1+9n)
+rbt_tm_n        defb 0          ; tile count
+rbt_tm_tbank    defb #ff        ; tileset bank (#ff = resident)
+rbt_tm_map      defw 0          ; map base
+rbt_tm_mbank    defb #ff        ; map bank (#ff = resident)
+rbt_tm_tprev    defb 0          ; pg guard save (tileset)
+rbt_tm_mprev    defb 0          ; pg guard save (map)
+rbt_tm_cells    defw 0          ; map cells (map+2)
+rbt_tm_mw       defb 0          ; map width
+rbt_tm_mh       defb 0          ; map height
+rbt_tm_vx       defb 0
+rbt_tm_vy       defb 0
+rbt_tm_vw       defb 32
+rbt_tm_vh       defb 24
+rbt_tm_camx     defb 0
+rbt_tm_camy     defb 0
+rbt_tm_r        defb 0
+rbt_tm_c        defb 0
+
+; ----------------------------------------------------------------------------
+; rbt_tm_mapat - B=mx, C=my -> A = tile id (0 when out of bounds).
+; Clobbers DE,HL.
+; ----------------------------------------------------------------------------
+rbt_tm_mapat:
+        ld      a,b
+        ld      hl,rbt_tm_mw
+        cp      (hl)
+        jr      nc,_oob
+        ld      a,c
+        ld      hl,rbt_tm_mh
+        cp      (hl)
+        jr      nc,_oob
+        ; addr = cells + my*mw + mx
+        ld      a,c
+        ld      hl,rbt_tm_mw
+        ld      e,(hl)
+        ld      d,0
+        ld      hl,0
+        or      a
+        jr      z,_row
+_mul    add     hl,de
+        dec     a
+        jr      nz,_mul
+_row    ld      d,0
+        ld      e,b
+        add     hl,de
+        ld      de,(rbt_tm_cells)
+        add     hl,de
+        ld      a,(hl)
+        ret
+_oob    xor     a
+        ret
+
+; ----------------------------------------------------------------------------
+; rbt_tm_on - tilemap in use? A = 1 when a map is set (sprite compositor
+; on other platforms queries this; MSX keeps it for parity)
+; ----------------------------------------------------------------------------
+rbt_tm_on:
+        ld      a,(rbt_tm_map)
+        or      a
+        ret
 ''',
   },
 };

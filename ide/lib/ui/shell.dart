@@ -591,6 +591,7 @@ class _ShellState extends State<Shell> {
     final emuCbmTapeCtl = TextEditingController(text: s.emulatorCmdCbmTape);
     final emuCbmCartCtl = TextEditingController(text: s.emulatorCmdCbmCart);
     final emuCbmPrgCtl = TextEditingController(text: s.emulatorCmdCbmPrg);
+    final emuMsxCtl = TextEditingController(text: s.emulatorCmdMsx);
     final pasmoCtl = TextEditingController(text: s.pasmoPath);
     final save = await showDialog<bool>(
       context: context,
@@ -714,6 +715,17 @@ class _ShellState extends State<Shell> {
                 ),
                 style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emuMsxCtl,
+                decoration: const InputDecoration(
+                  labelText: 'MSX emulator command — .rom/.cas '
+                      '({file} = artifact, {machine} = msx/msx2)',
+                  hintText: 'openmsx {file}',
+                  isDense: true,
+                ),
+                style: const TextStyle(fontFamily: 'Menlo', fontFamilyFallback: monoFontFallback, fontSize: 12),
+              ),
             ],
           ),
         ),
@@ -741,6 +753,7 @@ class _ShellState extends State<Shell> {
     s.emulatorCmdCbmTape = emuCbmTapeCtl.text.trim();
     s.emulatorCmdCbmCart = emuCbmCartCtl.text.trim();
     s.emulatorCmdCbmPrg = emuCbmPrgCtl.text.trim();
+    s.emulatorCmdMsx = emuMsxCtl.text.trim();
     s.pasmoPath = pasmoCtl.text.trim();
     await s.saveSettings();
   }

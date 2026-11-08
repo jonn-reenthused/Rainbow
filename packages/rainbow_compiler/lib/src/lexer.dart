@@ -98,6 +98,8 @@ class Lexer {
     'RND',
     'KEY',
     'INKEY',
+    'INPUT',
+    'MATCH',
     'JOY',
     'JOYSTICK',
     'KEMPSTON',

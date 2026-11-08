@@ -13,6 +13,11 @@ const kTargetIds = <String, int>{
   'cpc6128': 6128,
   'c64': 64,
   'c128': 1280,
+  // msx/msx2 use synthetic ids — no natural model number exists
+  // (16/32 are arbitrary, not memory sizes)
+  'msx': 16,
+  'msx1': 16,
+  'msx2': 32,
   '48': 48, // legacy aliases
   '128': 128,
 };
@@ -26,6 +31,8 @@ const kTargetNames = <int, String>{
   6128: 'cpc6128',
   64: 'c64',
   1280: 'c128',
+  16: 'msx',
+  32: 'msx2',
 };
 
 /// Display name for an id, falling back to the raw number.
@@ -35,7 +42,7 @@ String targetNameOf(int id) => kTargetNames[id] ?? '${id}K';
 /// module set, asset encoders, packaging format and emulator launch.
 /// (Named `TargetFamily`, not `TargetPlatform`, to avoid colliding with
 /// Flutter's own enum in the IDE.)
-enum TargetFamily { zx, cpc, cbm }
+enum TargetFamily { zx, cpc, cbm, msx }
 
 /// Explicit id -> family map. ZX ids are the memory size in K (48/128)
 /// or 3 for the +3; CPC ids are model numbers; cbm ids are 64 for the
@@ -48,6 +55,8 @@ const _familyOf = <int, TargetFamily>{
   6128: TargetFamily.cpc,
   64: TargetFamily.cbm,
   1280: TargetFamily.cbm,
+  16: TargetFamily.msx,
+  32: TargetFamily.msx,
 };
 
 TargetFamily platformOf(int id) => _familyOf[id] ?? TargetFamily.zx;
@@ -93,6 +102,21 @@ const kPlatformModules = <TargetFamily, Set<String>>{
     'sid',
     'diskload',
   },
+  // MSX1: hardware sprites + nametable make sprite/tilemap cheap.
+  // 'bank' = ASCII16 megaROM paging — banked assets page into the
+  // #4000-#7FFF window via a write to the #6000 mapper register.
+  // 'ant' is ZX beeper music — MSX always uses the AY (PSG is an
+  // AY-3-8910).
+  TargetFamily.msx: {
+    'pixel',
+    'sprite',
+    'tmdata',
+    'tilemap',
+    'spcoll',
+    'sfx',
+    'ay',
+    'bank',
+  },
 };
 
 /// Modules all platforms provide (names are the same across runtimes).
@@ -105,7 +129,10 @@ const kSharedModules = {'core', 'math', 'input', 'charset'};
 /// don't. The C128 does (MMU banks 0/1) but its semantics — whole-map
 /// remapping rather than a fixed window — aren't modelled yet.
 bool bankCapableOf(int target) =>
-    target == 128 || target == 6128 || target == 3;
+    target == 128 ||
+    target == 6128 ||
+    target == 3 ||
+    platformOf(target) == TargetFamily.msx;
 
 /// Whether [module] is available for [target].
 bool targetSupportsModule(int target, String module) =>
@@ -121,6 +148,9 @@ bool targetSupportsModule(int target, String module) =>
 int defaultOrgOf(int id) => switch (platformOf(id)) {
       TargetFamily.cpc => (id == 6128 ? 0x8000 : 0x4000),
       TargetFamily.cbm => (id == 1280 ? 0x1C01 : 0x0801),
+      // MSX: #8000 is the start of the RAM pages on a 32K machine —
+      // the payload runs/copies there, leaving #C000+ for stack+vars.
+      TargetFamily.msx => 0x8000,
       TargetFamily.zx => 0x8000,
     };
 

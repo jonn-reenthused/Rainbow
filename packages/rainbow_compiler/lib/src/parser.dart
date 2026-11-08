@@ -457,6 +457,20 @@ class Parser {
         _next();
         return SimpleStmt(t.line, t.col, 'WAITKEY');
 
+      case 'INPUT':
+        _next();
+        final first = _parseExpr();
+        Expr? prompt;
+        Expr target;
+        if (_at(TokKind.comma)) {
+          _next();
+          prompt = first;
+          target = _parseExpr();
+        } else {
+          target = first;
+        }
+        return InputStmt(t.line, t.col, prompt, target);
+
       case 'STOP':
       case 'END':
         _next();
@@ -1114,6 +1128,7 @@ class Parser {
         case 'JOY':
         case 'JOYFIRE':
         case 'INKEY':
+        case 'MATCH':
         case 'IN':
         case 'ABS':
         case 'MIN':

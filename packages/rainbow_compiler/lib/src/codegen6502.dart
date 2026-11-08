@@ -523,6 +523,9 @@ class CodeGen6502 {
         _cmt(s);
         final lbl = g.name == 'MAIN' ? 'rb_main' : 'rb_${g.name.toLowerCase()}';
         _i(g.isGosub ? 'jsr\t$lbl' : 'jmp\t$lbl');
+      case InputStmt i:
+        _cmt(s);
+        _genInput(i);
       case PrintStmt p:
         _cmt(s);
         _genPrint(p);
@@ -1401,6 +1404,18 @@ class CodeGen6502 {
         usedModules.add('input');
         _i('jsr\trbt_inkey');
         return RType.byte;
+      case 'MATCH':
+        // MATCH(buf, "literal") -> 1 if the NUL-terminated buffer equals
+        // the length-prefixed literal.
+        usedModules.add('input');
+        if (c.args.isNotEmpty && c.args[0] is VarExpr) {
+          _ldhl(_scope[(c.args[0] as VarExpr).name]!.asmLabel);
+        }
+        if (c.args.length > 1 && c.args[1] is StrLit) {
+          _ldde('rbs_${_strIndex((c.args[1] as StrLit).text)}');
+        }
+        _i('jsr\trbt_match');
+        return RType.byte;
       case 'IN':
         _genWord(c.args[0]);
         _i('ldy\t#0');
@@ -1542,6 +1557,22 @@ class CodeGen6502 {
       i = _strings.length - 1;
     }
     return i;
+  }
+
+  void _genInput(InputStmt st) {
+    usedModules.add('input');
+    usedModules.add('charset');
+    if (st.prompt case StrLit p) {
+      _ldhl('rbs_${_strIndex(p.text)}');
+      _i('jsr\trbt_print_str');
+    }
+    final v = st.target;
+    if (v is VarExpr) {
+      final sym = _scope[v.name]!;
+      _ldhl(sym.asmLabel);
+      _i('lda\t#${sym.size! - 1}');
+    }
+    _i('jsr\trbt_input');
   }
 
   void _genPrint(PrintStmt p) {

@@ -252,6 +252,13 @@ class PauseStmt extends Stmt {
   final Expr frames;
 }
 
+/// INPUT ["prompt",] buf — line editor into a byte array, NUL-terminated.
+class InputStmt extends Stmt {
+  InputStmt(super.line, super.col, this.prompt, this.target);
+  final Expr? prompt;
+  final Expr target;
+}
+
 /// Parameterless statement: HALT/WAITKEY/STOP/END/RESTORE.
 class SimpleStmt extends Stmt {
   SimpleStmt(super.line, super.col, this.kind);

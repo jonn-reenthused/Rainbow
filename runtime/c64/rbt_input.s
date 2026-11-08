@@ -62,6 +62,10 @@ rbt_key:
 @sel:   eor     #$ff            ; active-low column mask
         sei
         jsr     rbt_mapio
+        ldx     #$ff            ; port A all-output (columns can be driven)
+        stx     $dc02
+        ldx     #$00            ; port B all-input (rows readable)
+        stx     $dc03
         sta     $dc00
         lda     $dc01
         jsr     rbt_maprun
@@ -83,19 +87,50 @@ rbt_key:
 ; rbt_inkey - scan matrix, return ASCII of first pressed key (or 0)
 ; ----------------------------------------------------------------------------
 rbt_inkey:
-        lda     #0
-        sta     rbt_t1          ; code
-@scan:  lda     rbt_t1
-        jsr     rbt_key
-        bne     @found
-        inc     rbt_t1
-        lda     rbt_t1
-        cmp     #64
-        bcc     @scan
+        sei
+        jsr     rbt_mapio
+        lda     #$ff            ; port A output (column select)
+        sta     $dc02
+        lda     #$00            ; port B input (row read)
+        sta     $dc03
+        ldy     #0              ; col 0-7
+        lda     #$fe            ; ~(1<<col) mask, rotates left
+        sta     rbt_t0
+@col:   lda     rbt_t0
+        sta     $dc00           ; ground this column
+        lda     $dc01           ; row bits (0 = pressed)
+        cmp     #$ff
+        bne     @got            ; something held in this column
+        sec
+        rol     rbt_t0          ; next column mask
+        iny
+        cpy     #8
+        bcc     @col
+        lda     $dc00           ; restore idle column state
+        jsr     rbt_maprun
+        cli
         lda     #0
         rts
-@found: ldx     rbt_t1
-        lda     rbt_keymap,x
+@got:   sta     rbt_t1          ; column bits
+        lda     $dc00
+        jsr     rbt_maprun
+        cli
+        ; key index = col*8 + first clear bit
+        ldx     #0
+@bit:   lsr     rbt_t1
+        bcc     @map
+        inx
+        jmp     @bit
+@map:   tya                     ; col
+        asl     a
+        asl     a
+        asl     a               ; col*8
+        sta     rbt_t0
+        txa                     ; rowbit
+        clc
+        adc     rbt_t0          ; matrix index 0-63
+        tax
+        lda     rbt_cbmkeymap,x ; c64 matrix -> ASCII
         rts
 
 ; ----------------------------------------------------------------------------
@@ -177,3 +212,133 @@ rbt_keymap:
         .byte   'p','o','i','u','y',0,0,0     ; row 5
         .byte   13,'l','k','j','h',0,0,0      ; row 6
         .byte   ' ',0,'m','n','b',0,0,0       ; row 7
+
+; ----------------------------------------------------------------------------
+; rbt_input - line editor. rbt_hl = dest buffer, A = max length (size-1).
+; Echoes via rbt_putchar; 8/127/20 delete, 13 ends and NUL-terminates.
+; No auto-repeat: each accepted char waits for key release. All state is
+; kept in vars because rbt_inkey/rbt_putchar clobber registers.
+; ----------------------------------------------------------------------------
+rbt_input:
+        sta     rbt_in_max
+        lda     rbt_hl
+        sta     rbt_in_ptr
+        lda     rbt_hl+1
+        sta     rbt_in_ptr+1
+        lda     #0
+        sta     rbt_in_len
+@iw:    jsr     rbt_inkey       ; A = ascii or 0
+        beq     @iw             ; wait for a press
+        cmp     #13
+        beq     @idone
+        cmp     #8
+        beq     @ibs
+        cmp     #127
+        beq     @ibs
+        cmp     #20             ; c64 DEL
+        beq     @ibs
+        cmp     #32
+        bcc     @irel           ; ignore other control codes
+        ; append if len < maxlen
+        ldy     rbt_in_len
+        cpy     rbt_in_max
+        bcs     @irel           ; buffer full
+        ; copy the write ptr into zp rbt_hl for (zp),y addressing
+        ldx     rbt_in_ptr
+        stx     rbt_hl
+        ldx     rbt_in_ptr+1
+        stx     rbt_hl+1
+        ldy     #0
+        sta     (rbt_hl),y      ; A still holds the char
+        inc     rbt_in_ptr
+        bne     @nhi
+        inc     rbt_in_ptr+1
+@nhi:   inc     rbt_in_len
+        jsr     rbt_putchar     ; echo
+        jmp     @irel
+@ibs:   lda     rbt_in_len      ; backspace
+        beq     @irel
+        dec     rbt_in_len
+        lda     rbt_in_ptr
+        bne     @plo
+        dec     rbt_in_ptr+1
+@plo:   dec     rbt_in_ptr
+        jsr     _ibsch          ; erase the last printed char
+        jmp     @irel
+@irel:  jsr     rbt_inkey       ; wait for release before next press
+        bne     @irel
+        jmp     @iw
+@idone: lda     rbt_in_ptr
+        sta     rbt_hl
+        lda     rbt_in_ptr+1
+        sta     rbt_hl+1
+        ldy     #0
+        lda     #0
+        sta     (rbt_hl),y      ; NUL terminate
+@idrel: jsr     rbt_inkey       ; a held ENTER must release first, or the
+        bne     @idrel          ; next INPUT sees it again
+        rts
+
+; erase one char: cursor back (wrapping up a row at col 0), space, back again
+_ibsch:
+        lda     rbt_col
+        bne     @bl
+        dec     rbt_row         ; col 0: up a row to col 39
+        lda     #39
+        jmp     @bc
+@bl:    sec
+        sbc     #1
+@bc:    sta     rbt_col
+        lda     #' '
+        jsr     rbt_putchar     ; prints space, advances cursor
+        lda     rbt_col
+        bne     @b2
+        dec     rbt_row
+        lda     #39
+        jmp     @b3
+@b2:    sec
+        sbc     #1
+@b3:    sta     rbt_col
+        rts
+
+; ----------------------------------------------------------------------------
+; rbt_match - rbt_hl = NUL-terminated buffer, rbt_de = length-prefixed
+;   literal (.byte len,"text"). Out: A = 1 on exact match else 0.
+; ----------------------------------------------------------------------------
+rbt_match:
+        ldy     #0
+        lda     (rbt_de),y      ; literal length
+        tax                     ; X = bytes remaining
+        inc     rbt_de          ; DE -> first text byte
+        bne     @ml
+        inc     rbt_de+1
+@ml:    txa
+        beq     @mend
+        lda     (rbt_hl),y
+        cmp     (rbt_de),y
+        bne     @mno
+        iny
+        dex
+        jmp     @ml
+@mend:  lda     (rbt_hl),y      ; buffer must end here too
+        bne     @mno
+        lda     #1
+        rts
+@mno:   lda     #0
+        rts
+
+rbt_in_ptr:     .word   0
+rbt_in_len:     .byte   0
+rbt_in_max:     .byte   0
+
+; c64 matrix (col*8+rowbit) -> ASCII. Only real text keys mapped; shifts,
+; cursors, function keys and control keys return 0.
+rbt_cbmkeymap:
+        .byte   20,13,0,0,0,0,0,0          ; col 0: DEL RETURN _ F7 F1 F3 F5 _
+        .byte   '3','w','a','4','z','s','e',0  ; col 1: 3 W A 4 Z S E LSHIFT
+        .byte   '5','r','d','6','c','f','t','x'  ; col 2: 5 R D 6 C F T X
+        .byte   '7','y','g','8','b','h','u','v'  ; col 3: 7 Y G 8 B H U V
+        .byte   '9','i','j','0','m','k','o','n'  ; col 4: 9 I J 0 M K O N
+        .byte   '+','p','l','-','.',':','@',','  ; col 5: + P L - . : @ ,
+        .byte   0,'*',';',0,0,'=','^','/'        ; col 6: _ * ; HOME _ = ^ /
+        .byte   '1',0,0,'2',' ',0,'q',0          ; col 7: 1 <- CTRL 2 SPC C= Q STOP

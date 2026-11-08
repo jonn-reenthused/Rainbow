@@ -27,10 +27,10 @@ Future<void> main(List<String> args) async {
 
 void _usage() {
   stderr.writeln(
-      '''rainbow - ZX Spectrum game compiler (Rainbow BASIC -> Pasmo -> .tap)
+      '''rainbow - 8-bit game compiler (Rainbow BASIC -> Pasmo -> .tap/.cas/.rom)
 
 usage:
-  rainbow init <dir> [--target zx48|zx128]   scaffold a new project
+  rainbow init <dir> [--target zx48|zx128|msx]   scaffold a new project
   rainbow build <projectdir> [options]    compile project to .tap
   rainbow import-mod <in.mod> <out.ray>   convert a ProTracker module
   rainbow import-mus <in.mus> <out.ray>   convert a Sidplayer song

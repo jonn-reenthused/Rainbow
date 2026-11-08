@@ -202,6 +202,11 @@ Uint8List encodeRayBeeper(String name, Map<String, dynamic> json) {
 Uint8List encodeRntCpc(String name, Map<String, dynamic> json) =>
     _rntToAy(name, json, 1.0);
 
+/// Encode an AntEater beeper song (.rnt) for the MSX AY player: same
+/// conversion, periods scaled for the ~1.79 MHz PSG clock.
+Uint8List encodeRntMsx(String name, Map<String, dynamic> json) =>
+    _rntToAy(name, json, 1.7897725);
+
 /// Encode an AntEater beeper song (.rnt) for the 128K/+3 ZX AY player:
 /// same conversion, periods scaled for the ZX's 1.7734 MHz AY clock.
 Uint8List encodeRntZx(String name, Map<String, dynamic> json) =>
@@ -306,7 +311,16 @@ Uint8List encodeRsf(String name, Map<String, dynamic> json) {
 ///   (32*per + 152)/56 ~ per*0.5714 + 2.7 -> q8: (32*per + 152)*8/56.
 /// dur reproduces the ZX per-iteration time (~per*18.3 + 87 T at 4 MHz)
 /// minus the player's ~700 T per-step PSG write overhead.
-Uint8List encodeRsfCpc(String name, Map<String, dynamic> json) {
+Uint8List encodeRsfCpc(String name, Map<String, dynamic> json) =>
+    _encodeRsfAy(name, json, 1.0);
+
+/// Encode a beeper SFX (.rsf) for the MSX PSG (channel C): same step
+/// format, periods rescaled for the ~1.79 MHz AY clock.
+Uint8List encodeRsfMsx(String name, Map<String, dynamic> json) =>
+    _encodeRsfAy(name, json, 1.7897725);
+
+Uint8List _encodeRsfAy(
+    String name, Map<String, dynamic> json, double ayMHz) {
   final steps = (json['steps'] as List?)?.cast<Map<String, dynamic>>();
   if (steps == null || steps.isEmpty) {
     throw AssetFormatException(name, 'missing steps');
@@ -320,8 +334,11 @@ Uint8List encodeRsfCpc(String name, Map<String, dynamic> json) {
     final per = (s['per'] as int? ?? 0).clamp(0, 255);
     final slide = (s['slide'] as int? ?? 0).clamp(-128, 127);
     final dur = ((per * 18.29 + 87 - 720) / 13).round().clamp(1, 255);
-    final pq = ((per * 32 + 152) * 8 / 56).round().clamp(0, 32767); // q8 period
-    final sq = (slide * 32 * 8 / 56).round().clamp(-32768, 32767);
+    final pq = ((per * 32 + 152) * 8 * ayMHz / 56)
+        .round()
+        .clamp(0, 32767); // q8 period
+    final sq =
+        (slide * 32 * 8 * ayMHz / 56).round().clamp(-32768, 32767);
     out.addByte(len);
     out.addByte(dur);
     out.addByte(pq & 0xFF);
@@ -337,9 +354,20 @@ Uint8List encodeRsfCpc(String name, Map<String, dynamic> json) {
 /// noise and envelope periods are rescaled for the CPC's 1 MHz AY clock
 /// (ZX AY = 1.7734 MHz; f = clock/(16*period), so same-pitch periods
 /// shrink by the clock ratio) so ZX-authored .ray assets keep pitch.
-Uint8List encodeRayCpc(String name, Map<String, dynamic> json) {
+Uint8List encodeRayCpc(String name, Map<String, dynamic> json) =>
+    _encodeRayAy(name, json, 1.0);
+
+/// Encode an AY song (.ray) for the MSX: periods rescaled for the
+/// ~1.79 MHz PSG clock (3579545 Hz / 2 = 1789772.5 Hz).
+Uint8List encodeRayMsx(String name, Map<String, dynamic> json) =>
+    _encodeRayAy(name, json, 1.7897725);
+
+/// Encode a .ray for an AY at [ayMHz], re-basing periods from the
+/// ZX clock the authoring format assumes.
+Uint8List _encodeRayAy(
+    String name, Map<String, dynamic> json, double ayMHz) {
   final zx = encodeRay(name, json); // reuse the row encoding + end marker
-  const scale = 1.0 / 1.7734;
+  final scale = ayMHz / 1.7734;
   int scaleReg(int lo, int hi, int mask) {
     final p = zx[lo] | ((zx[hi] & (mask >> 8)) << 8);
     final q = (p * scale).round().clamp(0, mask);

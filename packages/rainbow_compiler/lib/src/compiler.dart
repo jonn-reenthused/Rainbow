@@ -94,6 +94,11 @@ CompileResult compile(Map<String, String> sources,
       ..writeln('RBT_SCRB\tequ\t#${scrb.toRadixString(16).padLeft(4, '0')}')
       ..writeln('RBT_SCRP\tequ\t#${(scrb >> 8).toRadixString(16)}')
       ..writeln('');
+  } else if (platformOf(info.target) == TargetFamily.msx) {
+    // MSX2 flag: the runtime shares one source across TMS9918 and V9938
+    // machines and branches on this equ (like RBT_C128 on the cbm path).
+    buf.writeln('RBT_MSX2\tequ\t${info.target == 32 ? 1 : 0}');
+    buf.writeln('');
   } else {
     // ROM select bit for #7FFD writes when paging banks: bit 4 set
     // picks the 48K BASIC ROM on the toastrack and ROM3 (the +3's
@@ -184,7 +189,8 @@ CompileResult compile(Map<String, String> sources,
   // The CPC sfx player checks rbt_ay_on to decide whether it may touch
   // the mixer and reads rbt_ay_r7 (the music's last mixer byte) to merge
   // the channel-C bits; emit stubs when sfx plays without the ay module.
-  if (cpc && used.contains('sfx') && !used.contains('ay')) {
+  final msx = platformOf(info.target) == TargetFamily.msx;
+  if ((cpc || msx) && used.contains('sfx') && !used.contains('ay')) {
     buf.writeln('rbt_ay_on:\tdb\t0');
     buf.writeln('rbt_ay_r7:\tdb\t0');
     buf.writeln('');
@@ -201,10 +207,13 @@ CompileResult compile(Map<String, String> sources,
     buf.writeln('rbt_tm_redraw:\tret');
     buf.writeln('');
   }
-  if (cart && used.contains('charset')) {
+  if ((cart || platformOf(info.target) == TargetFamily.msx) &&
+      used.contains('charset')) {
     // Cart builds have no ROM/firmware font to fall back on, so the
     // Spectrum charset is embedded; rbt_font points at it under
-    // RBT_CART (a CHARSET asset still wins at runtime).
+    // RBT_CART (a CHARSET asset still wins at runtime). The MSX runtime
+    // is firmware-free too — slot-paging the BIOS font isn't portable,
+    // so it uses the embedded font on every build.
     buf.writeln('rbt_cartfont:');
     for (var i = 0; i < zxFont.length; i += 8) {
       buf.writeln('\tdefb\t${zxFont.sublist(i, i + 8).join(',')}');
